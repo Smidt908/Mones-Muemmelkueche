@@ -1,0 +1,748 @@
+/* ══════════════════════════════════════════════════════
+   Mones Mümmelküche
+   Rot-weiß karierte Tischdecke, darauf liegen die Rezepte
+   als Papierkarten.
+   ══════════════════════════════════════════════════════ */
+
+:root {
+  --rot:        #c8102e;
+  --rot-dunkel: #a4161a;
+  --rot-tief:   #7d1128;
+  --rot-blass:  #f7dcdf;
+
+  --papier:      #fffdf7;
+  --papier-rand: #ecdfd2;
+  --tinte:       #3a2b2b;
+  --tinte-leise: #7d6b66;
+
+  --gold: #d99e32;
+
+  --rund:      18px;
+  --rund-klein: 10px;
+  --schatten:  0 2px 4px rgba(90, 20, 30, .10), 0 10px 24px rgba(90, 20, 30, .13);
+  --schatten-klein: 0 1px 2px rgba(90, 20, 30, .10), 0 4px 10px rgba(90, 20, 30, .10);
+
+  --schrift-serif: Georgia, "Palatino Linotype", "Book Antiqua", "Times New Roman", serif;
+  --schrift-glatt: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --leiste-breite: 260px;
+  --kopf-hoehe: 64px;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--schrift-glatt);
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--tinte);
+  background: #fff;
+  overflow-x: hidden;
+}
+
+/* Die Tischdecke: zwei halbdurchsichtige rote Streifengitter über Weiß.
+   Wo sie sich kreuzen, entsteht das kräftige Rot des Vichy-Karos. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  --zelle: 26px;
+  background-color: #fff;
+  background-image:
+    repeating-linear-gradient(0deg,  rgba(200,16,46,.5) 0 var(--zelle), rgba(0,0,0,0) var(--zelle) calc(var(--zelle) * 2)),
+    repeating-linear-gradient(90deg, rgba(200,16,46,.5) 0 var(--zelle), rgba(0,0,0,0) var(--zelle) calc(var(--zelle) * 2));
+}
+
+/* ── Kopfzeile ──────────────────────────────────────── */
+
+.kopf {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--kopf-hoehe);
+  padding: 6px 12px;
+  padding-top: max(6px, env(safe-area-inset-top));
+  background: var(--rot);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(90, 20, 30, .3);
+}
+
+/* Bogenkante wie an einer Tischdecke */
+.kopf::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -9px;
+  height: 10px;
+  background: radial-gradient(circle at 10px 1px, var(--rot) 8.5px, rgba(0,0,0,0) 9.5px) repeat-x;
+  background-size: 20px 10px;
+  pointer-events: none;
+}
+
+.kopf__mitte { flex: 1; min-width: 0; text-align: center; }
+
+.kopf__titel {
+  margin: 0;
+  font-family: var(--schrift-serif);
+  font-size: clamp(1.15rem, 4.4vw, 1.7rem);
+  font-weight: 700;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0,0,0,.22);
+}
+
+.kopf__unterzeile {
+  margin: 0;
+  font-size: .72rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  opacity: .85;
+}
+
+.kopf__knopf {
+  flex: none;
+  width: 44px; height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255,255,255,.16);
+  color: #fff;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .15s, transform .1s;
+}
+.kopf__knopf:hover { background: rgba(255,255,255,.28); }
+.kopf__knopf:active { transform: scale(.93); }
+
+.kopf__knopf--neu { background: #fff; color: var(--rot); font-weight: 700; }
+.kopf__knopf--neu:hover { background: var(--rot-blass); }
+
+.burger, .burger::before, .burger::after {
+  display: block;
+  width: 19px; height: 2.5px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.burger { position: relative; }
+.burger::before, .burger::after { content: ""; position: absolute; left: 0; }
+.burger::before { top: -6px; }
+.burger::after  { top: 6px; }
+
+/* ── Bühne ──────────────────────────────────────────── */
+
+.buehne {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 22px 14px 60px;
+}
+
+/* ── Kategorien-Leiste ──────────────────────────────── */
+
+.leiste {
+  flex: none;
+  width: var(--leiste-breite);
+  background: var(--papier);
+  border: 1px solid var(--papier-rand);
+  border-radius: var(--rund);
+  box-shadow: var(--schatten);
+  overflow: hidden;
+}
+
+.leiste__suche { padding: 12px; border-bottom: 1px dashed var(--papier-rand); }
+
+.leiste__suche input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--papier-rand);
+  border-radius: 999px;
+  background: #fff;
+  font: inherit;
+  font-size: .95rem;
+  color: inherit;
+}
+.leiste__suche input:focus-visible { outline: 2px solid var(--rot); outline-offset: 1px; }
+
+.leiste__nav { padding: 8px; max-height: 62vh; overflow-y: auto; }
+
+.reiter {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 11px;
+  margin-bottom: 2px;
+  border: 0;
+  border-radius: var(--rund-klein);
+  background: none;
+  font: inherit;
+  font-size: .95rem;
+  color: var(--tinte);
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s;
+}
+.reiter:hover { background: var(--rot-blass); }
+
+.reiter--an {
+  background: var(--rot);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: var(--schatten-klein);
+}
+.reiter--an:hover { background: var(--rot-dunkel); }
+
+.reiter__bild { flex: none; font-size: 1.05rem; line-height: 1; }
+.reiter__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.reiter__zahl {
+  flex: none;
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--rot-blass);
+  color: var(--rot-tief);
+  font-size: .74rem;
+  font-weight: 700;
+  text-align: center;
+}
+.reiter--an .reiter__zahl { background: rgba(255,255,255,.28); color: #fff; }
+
+.leiste__fuss {
+  padding: 12px;
+  border-top: 1px dashed var(--papier-rand);
+  display: grid;
+  gap: 7px;
+}
+
+.leiste__hinweis {
+  margin: 0 0 3px;
+  font-size: .74rem;
+  line-height: 1.4;
+  color: var(--tinte-leise);
+}
+
+/* ── Hauptbereich ───────────────────────────────────── */
+
+.haupt { flex: 1; min-width: 0; }
+
+.ansicht { animation: auftauchen .22s ease-out; }
+@keyframes auftauchen { from { opacity: 0; transform: translateY(6px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ansicht { animation: none; }
+  * { transition: none !important; }
+}
+
+/* ── Papierkarte ────────────────────────────────────── */
+
+.karte {
+  background: var(--papier);
+  border: 1px solid var(--papier-rand);
+  border-radius: var(--rund);
+  box-shadow: var(--schatten);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.karte--kopf { padding: 14px 20px; }
+
+.ueberschrift {
+  margin: 0;
+  font-family: var(--schrift-serif);
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--rot-tief);
+}
+
+.beischrift { margin: 4px 0 0; font-size: .9rem; color: var(--tinte-leise); }
+
+.zurueck {
+  display: inline-block;
+  margin: 0 0 10px;
+  padding: 6px 12px 6px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--rot-blass);
+  color: var(--rot-tief);
+  font: inherit;
+  font-size: .87rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.zurueck:hover { background: #f0c9ce; }
+
+/* ── Knöpfe ─────────────────────────────────────────── */
+
+.knopf {
+  padding: 11px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--rot);
+  color: #fff;
+  font: inherit;
+  font-size: .95rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--schatten-klein);
+  transition: background .15s, transform .1s;
+}
+.knopf:hover { background: var(--rot-dunkel); }
+.knopf:active { transform: scale(.97); }
+.knopf:disabled { opacity: .5; cursor: default; transform: none; }
+
+.knopf--voll { width: 100%; }
+
+.knopf--leise {
+  background: #fff;
+  color: var(--rot-tief);
+  border: 1px solid var(--papier-rand);
+  font-size: .88rem;
+  box-shadow: none;
+}
+.knopf--leise:hover { background: var(--rot-blass); }
+
+.knopf--gefahr { background: #fff; color: #93222c; border: 1px solid #e8bfc4; box-shadow: none; }
+.knopf--gefahr:hover { background: #fbe9eb; }
+
+/* ── Rezeptraster ───────────────────────────────────── */
+
+.raster {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: 14px;
+}
+
+.rezept-karte {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--papier-rand);
+  border-radius: var(--rund);
+  background: var(--papier);
+  box-shadow: var(--schatten-klein);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: transform .14s, box-shadow .14s;
+}
+.rezept-karte:hover { transform: translateY(-3px); box-shadow: var(--schatten); }
+
+.rezept-karte__bild {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  background: var(--rot-blass);
+  display: block;
+}
+
+.rezept-karte__band {
+  height: 7px;
+  background: repeating-linear-gradient(90deg, var(--rot) 0 12px, #fff 12px 24px);
+  opacity: .85;
+}
+
+.rezept-karte__inhalt { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+
+.rezept-karte__titel {
+  margin: 0;
+  font-family: var(--schrift-serif);
+  font-size: 1.06rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--rot-tief);
+}
+
+.rezept-karte__zeile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  font-size: .8rem;
+  color: var(--tinte-leise);
+}
+
+.marke {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--rot-blass);
+  color: var(--rot-tief);
+  font-size: .74rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ── Sterne ─────────────────────────────────────────── */
+
+.sterne { display: inline-flex; gap: 1px; line-height: 1; white-space: nowrap; }
+.sterne__stern { color: var(--gold); font-size: .95rem; }
+.sterne__stern--leer { color: #dccfc4; }
+
+.sterne-wahl { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+
+.sterne-wahl__knopf {
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: #dccfc4;
+  font-size: 1.55rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform .1s, color .1s;
+}
+.sterne-wahl__knopf:hover { transform: scale(1.15); }
+.sterne-wahl__knopf--an { color: var(--gold); }
+
+.sterne-wahl__text {
+  margin-left: 8px;
+  font-size: .88rem;
+  font-style: italic;
+  color: var(--tinte-leise);
+}
+
+/* ── Leerer Zustand ─────────────────────────────────── */
+
+.leer {
+  padding: 44px 24px;
+  border: 2px dashed rgba(255,255,255,.85);
+  border-radius: var(--rund);
+  background: rgba(255,253,247,.94);
+  box-shadow: var(--schatten);
+  text-align: center;
+  color: var(--tinte-leise);
+}
+.leer__gross {
+  margin: 0 0 8px;
+  font-family: var(--schrift-serif);
+  font-size: 1.25rem;
+  color: var(--rot-tief);
+}
+.leer p { margin: 0; }
+
+/* ── Wege zum neuen Rezept ──────────────────────────── */
+
+.wege { display: grid; gap: 12px; margin-top: 16px; }
+
+.weg {
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  grid-template-rows: auto auto;
+  gap: 2px 14px;
+  padding: 16px;
+  border: 1px solid var(--papier-rand);
+  border-radius: var(--rund);
+  background: #fff;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color .14s, transform .14s, box-shadow .14s;
+}
+.weg:hover { border-color: var(--rot); transform: translateY(-2px); box-shadow: var(--schatten-klein); }
+
+.weg__bild { grid-row: 1 / 3; font-size: 1.9rem; line-height: 1; align-self: center; }
+.weg__titel { font-family: var(--schrift-serif); font-size: 1.05rem; font-weight: 700; color: var(--rot-tief); }
+.weg__text { font-size: .86rem; line-height: 1.45; color: var(--tinte-leise); }
+
+/* ── Formularfelder ─────────────────────────────────── */
+
+.feld-block { margin-top: 16px; display: grid; gap: 10px; }
+
+.feld { display: block; margin-bottom: 15px; }
+.feld__name { display: block; margin-bottom: 4px; font-size: .87rem; font-weight: 700; color: var(--rot-tief); }
+.feld__leise { font-weight: 400; color: var(--tinte-leise); }
+.feld__tipp { display: block; margin-bottom: 5px; font-size: .78rem; line-height: 1.45; color: var(--tinte-leise); }
+.feld__paar { display: flex; gap: 7px; }
+.feld__paar input { width: 78px; flex: none; }
+.feld__paar select { flex: 1; min-width: 0; }
+
+.feld input[type="text"], .feld input[type="url"], .feld input[type="number"],
+.feld select, .feld textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--papier-rand);
+  border-radius: var(--rund-klein);
+  background: #fff;
+  font: inherit;
+  font-size: .97rem;
+  color: inherit;
+}
+.feld textarea { resize: vertical; line-height: 1.6; }
+.feld :is(input, select, textarea):focus-visible { outline: 2px solid var(--rot); outline-offset: 1px; border-color: var(--rot); }
+
+.feld-reihe { display: grid; grid-template-columns: 1fr; gap: 0; }
+
+.formular__fuss { display: grid; gap: 8px; margin-top: 6px; }
+
+.notiz { margin: 0; font-size: .78rem; line-height: 1.45; color: var(--tinte-leise); }
+
+.fehler {
+  margin: 12px 0 0;
+  padding: 11px 14px;
+  border: 1px solid #e8bfc4;
+  border-radius: var(--rund-klein);
+  background: #fbe9eb;
+  color: #8d1f2a;
+  font-size: .88rem;
+  line-height: 1.5;
+}
+
+/* ── Fortschritt ────────────────────────────────────── */
+
+.arbeit { margin-top: 18px; }
+
+.arbeit__balken {
+  height: 9px;
+  border-radius: 999px;
+  background: var(--rot-blass);
+  overflow: hidden;
+}
+.arbeit__fuell {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--rot);
+  transition: width .3s ease-out;
+}
+.arbeit__text { margin: 8px 0 0; font-size: .86rem; color: var(--tinte-leise); text-align: center; }
+
+/* ── Rezeptansicht ──────────────────────────────────── */
+
+.rezept__bild {
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: var(--rund);
+  border: 1px solid var(--papier-rand);
+  box-shadow: var(--schatten);
+  margin-bottom: 16px;
+  display: block;
+}
+
+.rezept__titel {
+  margin: 6px 0 8px;
+  font-family: var(--schrift-serif);
+  font-size: clamp(1.5rem, 5vw, 2.05rem);
+  line-height: 1.2;
+  color: var(--rot-tief);
+}
+
+.rezept__meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .85rem; color: var(--tinte-leise); }
+
+.rezept__quelle { color: var(--tinte-leise); word-break: break-word; }
+.rezept__quelle a { color: var(--rot); }
+
+/* Portionsrechner */
+.portionen {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border: 1px solid var(--rot-blass);
+  border-radius: var(--rund);
+  background: linear-gradient(#fff, #fffaf6);
+  box-shadow: var(--schatten-klein);
+}
+
+.portionen__name { font-size: .87rem; font-weight: 700; color: var(--rot-tief); }
+
+.portionen__wahl { display: flex; align-items: center; gap: 6px; }
+
+.portionen__knopf {
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--rot);
+  color: #fff;
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--schatten-klein);
+}
+.portionen__knopf:hover { background: var(--rot-dunkel); }
+.portionen__knopf:disabled { opacity: .35; cursor: default; }
+
+.portionen__zahl {
+  min-width: 62px;
+  padding: 6px 8px;
+  border: 1px solid var(--papier-rand);
+  border-radius: var(--rund-klein);
+  background: #fff;
+  font-family: var(--schrift-serif);
+  font-size: 1.45rem;
+  font-weight: 700;
+  text-align: center;
+  color: var(--rot-tief);
+  -moz-appearance: textfield;
+}
+.portionen__zahl::-webkit-outer-spin-button,
+.portionen__zahl::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+.portionen__einheit { font-size: .95rem; font-weight: 600; color: var(--tinte); }
+
+.portionen__hinweis { flex-basis: 100%; margin: 0; font-size: .78rem; color: var(--tinte-leise); }
+.portionen__hinweis--still { visibility: hidden; }
+
+/* Zutaten */
+.zutaten { list-style: none; margin: 0; padding: 0; }
+
+.zutaten__zeile {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 2px;
+  border-bottom: 1px dashed var(--papier-rand);
+}
+.zutaten__zeile:last-child { border-bottom: 0; }
+
+.zutaten__menge {
+  flex: none;
+  min-width: 88px;
+  font-weight: 700;
+  color: var(--rot-tief);
+  font-variant-numeric: tabular-nums;
+}
+.zutaten__was { flex: 1; min-width: 0; }
+
+.zutaten__gruppe {
+  margin: 16px 0 2px;
+  padding: 0 2px 4px;
+  border-bottom: 2px solid var(--rot-blass);
+  font-family: var(--schrift-serif);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--rot);
+}
+.zutaten__gruppe:first-child { margin-top: 0; }
+
+/* Zubereitung */
+.schritte { list-style: none; margin: 0; padding: 0; counter-reset: schritt; }
+
+.schritte__zeile {
+  position: relative;
+  counter-increment: schritt;
+  padding: 0 0 18px 46px;
+  line-height: 1.65;
+}
+.schritte__zeile::before {
+  content: counter(schritt);
+  position: absolute;
+  left: 0; top: -1px;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--rot);
+  color: #fff;
+  font-family: var(--schrift-serif);
+  font-size: .95rem;
+  font-weight: 700;
+}
+.schritte__zeile:last-child { padding-bottom: 0; }
+
+/* Notizen */
+.notizfeld {
+  width: 100%;
+  min-height: 90px;
+  padding: 12px 14px;
+  border: 1px solid var(--papier-rand);
+  border-radius: var(--rund-klein);
+  background: repeating-linear-gradient(#fffef9 0 27px, #f2e7dc 27px 28px);
+  font: inherit;
+  font-size: .97rem;
+  line-height: 28px;
+  color: inherit;
+  resize: vertical;
+}
+.notizfeld:focus-visible { outline: 2px solid var(--rot); outline-offset: 1px; }
+
+.notiz-stand { margin: 6px 0 0; font-size: .78rem; color: var(--tinte-leise); min-height: 1.2em; }
+
+.rezept__werkzeug { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ── Schleier für die Leiste auf dem Handy ──────────── */
+
+.schleier {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(70, 15, 25, .45);
+  backdrop-filter: blur(2px);
+  animation: einblenden .2s;
+}
+@keyframes einblenden { from { opacity: 0; } }
+
+/* ══════════════════════════════════════════════════════
+   Handy: Leiste fährt von links ein.
+   Tablet/Rechner ab 820px: Leiste steht fest links.
+   ══════════════════════════════════════════════════════ */
+
+@media (max-width: 819px) {
+  body { font-size: 16px; }
+
+  .buehne { padding: 16px 12px 60px; }
+
+  .leiste {
+    position: fixed;
+    top: 0; bottom: 0; left: 0;
+    z-index: 21;
+    width: min(84vw, 320px);
+    border-radius: 0 var(--rund) var(--rund) 0;
+    border-left: 0;
+    padding-top: max(10px, env(safe-area-inset-top));
+    display: flex;
+    flex-direction: column;
+    transform: translateX(-102%);
+    transition: transform .24s ease-out;
+  }
+  .leiste--auf { transform: translateX(0); }
+
+  .leiste__nav { flex: 1; max-height: none; }
+
+  .karte { padding: 16px; }
+  .karte--kopf { padding: 12px 16px; }
+
+  .raster { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 11px; }
+
+  .zutaten__menge { min-width: 76px; }
+}
+
+@media (min-width: 820px) {
+  .kopf__knopf#knopf-leiste { display: none; }
+  .schleier { display: none !important; }
+
+  .leiste { position: sticky; top: calc(var(--kopf-hoehe) + 22px); }
+
+  .feld-reihe { grid-template-columns: 1fr 210px; gap: 14px; }
+
+  .formular__fuss { grid-template-columns: 1fr auto; }
+  .knopf--voll { width: auto; }
+  #link-holen { justify-self: start; }
+}
+
+/* Drucken: Tischdecke weg, Rezept aufs Papier. */
+@media print {
+  body::before, .kopf, .leiste, .rezept__werkzeug, .zurueck, .portionen__knopf { display: none !important; }
+  .buehne { display: block; padding: 0; }
+  .karte { box-shadow: none; border: 0; padding: 0; }
+}

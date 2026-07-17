@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mones Mümmelküche</title>
+<meta name="description" content="Das Kochbuch von Mone: Rezepte sammeln, sortieren, bewerten und auf die richtige Portionszahl umrechnen.">
+<meta name="theme-color" content="#c8102e">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Mümmelküche">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<!-- ── Kopfzeile ───────────────────────────────────────── -->
+<header class="kopf">
+  <button class="kopf__knopf" id="knopf-leiste" aria-label="Kategorien anzeigen" aria-expanded="false" aria-controls="leiste">
+    <span class="burger" aria-hidden="true"></span>
+  </button>
+
+  <div class="kopf__mitte">
+    <h1 class="kopf__titel">Mones Mümmelküche</h1>
+    <p class="kopf__unterzeile">Gekocht wird, was schmeckt</p>
+  </div>
+
+  <button class="kopf__knopf kopf__knopf--neu" id="knopf-neu" aria-label="Neues Rezept aufnehmen">
+    <span aria-hidden="true">+</span>
+  </button>
+</header>
+
+<div class="buehne">
+
+  <!-- ── Kategorien-Leiste ─────────────────────────────── -->
+  <div class="schleier" id="schleier" hidden></div>
+
+  <aside class="leiste" id="leiste">
+    <div class="leiste__suche">
+      <input type="search" id="suche" placeholder="Rezept suchen …" aria-label="Rezept suchen" autocomplete="off">
+    </div>
+
+    <nav class="leiste__nav" id="kategorien" aria-label="Kategorien"></nav>
+
+    <div class="leiste__fuss">
+      <p class="leiste__hinweis" id="speicher-hinweis"></p>
+      <button class="knopf knopf--leise" id="knopf-export">Sicherung speichern</button>
+      <button class="knopf knopf--leise" id="knopf-import">Sicherung laden</button>
+      <input type="file" id="datei-sicherung" accept="application/json,.json" hidden>
+    </div>
+  </aside>
+
+  <!-- ── Hauptbereich ──────────────────────────────────── -->
+  <main class="haupt" id="haupt">
+
+    <!-- Ansicht: Rezeptliste -->
+    <section class="ansicht ansicht--an" id="ansicht-liste" aria-label="Rezeptliste">
+      <div class="karte karte--kopf">
+        <h2 class="ueberschrift" id="listen-titel">Alle Rezepte</h2>
+        <p class="beischrift" id="listen-zahl"></p>
+      </div>
+      <div class="raster" id="raster"></div>
+      <div class="leer" id="leer-hinweis" hidden>
+        <p class="leer__gross">Noch kein Rezept da.</p>
+        <p>Tippe oben rechts auf <strong>+</strong> und nimm das erste auf —
+           per Foto, per Link oder von Hand.</p>
+      </div>
+    </section>
+
+    <!-- Ansicht: Rezept ansehen -->
+    <section class="ansicht" id="ansicht-rezept" aria-label="Rezept" hidden></section>
+
+    <!-- Ansicht: Neues Rezept aufnehmen -->
+    <section class="ansicht" id="ansicht-neu" aria-label="Neues Rezept" hidden>
+      <div class="karte">
+        <button class="zurueck" data-zurueck>← Zurück</button>
+        <h2 class="ueberschrift">Neues Rezept aufnehmen</h2>
+        <p class="beischrift">Such dir aus, wie du das Rezept in die Küche holst.</p>
+
+        <div class="wege">
+          <button class="weg" id="weg-foto">
+            <span class="weg__bild" aria-hidden="true">📷</span>
+            <span class="weg__titel">Foto oder Screenshot</span>
+            <span class="weg__text">Aus dem Kochbuch abfotografieren oder einen Screenshot
+              auswählen. Die App liest den Text und du besserst nach.</span>
+          </button>
+
+          <button class="weg" id="weg-link">
+            <span class="weg__bild" aria-hidden="true">🔗</span>
+            <span class="weg__titel">Link einer Rezeptseite</span>
+            <span class="weg__text">Adresse einfügen — bei den meisten Rezeptseiten
+              übernimmt die App alles von allein.</span>
+          </button>
+
+          <button class="weg" id="weg-text">
+            <span class="weg__bild" aria-hidden="true">📋</span>
+            <span class="weg__titel">Rezepttext einfügen</span>
+            <span class="weg__text">Auf der Seite alles markieren, kopieren, hier einfügen.
+              Klappt immer — auch wenn die Seite den Link-Weg verweigert.</span>
+          </button>
+
+          <button class="weg" id="weg-hand">
+            <span class="weg__bild" aria-hidden="true">✍️</span>
+            <span class="weg__titel">Von Hand eintragen</span>
+            <span class="weg__text">Omas Rezept aus dem Kopf? Hier ist das leere Blatt.</span>
+          </button>
+        </div>
+
+        <input type="file" id="datei-foto" accept="image/*" hidden>
+
+        <!-- Linkeingabe -->
+        <div class="feld-block" id="link-block" hidden>
+          <label class="feld">
+            <span class="feld__name">Adresse des Rezepts</span>
+            <input type="url" id="link-eingabe" placeholder="https://www.chefkoch.de/rezepte/…"
+                   inputmode="url" autocomplete="off">
+          </label>
+          <button class="knopf knopf--voll" id="link-holen">Rezept holen</button>
+          <p class="notiz">Die Seite wird über einen fremden Weiterleitungsdienst geladen,
+             weil der Browser fremde Seiten sonst blockiert. Dorthin geht nur die
+             Rezept-Adresse, sonst nichts. Klappt es nicht, hilft ein Screenshot.</p>
+        </div>
+
+        <!-- Texteingabe -->
+        <div class="feld-block" id="text-block" hidden>
+          <label class="feld">
+            <span class="feld__name">Rezepttext</span>
+            <span class="feld__tipp">Ruhig alles einfügen — die App sucht sich Titel,
+              Portionen, Zutaten und Schritte selbst heraus.</span>
+            <textarea id="text-eingabe" rows="12" placeholder="Kürbissuppe&#10;Für 4 Portionen&#10;&#10;Zutaten&#10;1 kg Kürbis&#10;…"></textarea>
+          </label>
+          <button class="knopf knopf--voll" id="text-lesen">Rezept lesen</button>
+        </div>
+
+        <!-- Fortschritt -->
+        <div class="arbeit" id="arbeit" hidden>
+          <div class="arbeit__balken"><div class="arbeit__fuell" id="arbeit-fuell"></div></div>
+          <p class="arbeit__text" id="arbeit-text">Einen Moment …</p>
+        </div>
+
+        <p class="fehler" id="neu-fehler" hidden></p>
+      </div>
+    </section>
+
+    <!-- Ansicht: Rezept prüfen und bearbeiten -->
+    <section class="ansicht" id="ansicht-formular" aria-label="Rezept bearbeiten" hidden>
+      <form class="karte" id="formular" novalidate>
+        <button type="button" class="zurueck" data-zurueck>← Zurück</button>
+        <h2 class="ueberschrift" id="formular-titel">Rezept prüfen</h2>
+        <p class="beischrift" id="formular-hinweis"></p>
+
+        <label class="feld">
+          <span class="feld__name">Name des Rezepts</span>
+          <input type="text" id="f-titel" required>
+        </label>
+
+        <div class="feld-reihe">
+          <label class="feld">
+            <span class="feld__name">Kategorie</span>
+            <select id="f-kategorie"></select>
+            <span class="feld__tipp" id="f-kategorie-tipp"></span>
+          </label>
+
+          <label class="feld feld--schmal">
+            <span class="feld__name">Reicht für</span>
+            <div class="feld__paar">
+              <input type="number" id="f-portionen" min="1" max="99" step="1" inputmode="numeric" required>
+              <select id="f-einheit">
+                <option value="Portionen">Portionen</option>
+                <option value="Personen">Personen</option>
+                <option value="Stück">Stück</option>
+                <option value="Gläser">Gläser</option>
+                <option value="Blech">Blech</option>
+              </select>
+            </div>
+          </label>
+        </div>
+
+        <label class="feld">
+          <span class="feld__name">Zutaten</span>
+          <span class="feld__tipp">Eine Zutat pro Zeile, z. B. <em>250 g Mehl</em>.
+            Eine Zeile mit Doppelpunkt am Ende wird zur Zwischenüberschrift,
+            z. B. <em>Für den Teig:</em></span>
+          <textarea id="f-zutaten" rows="10" spellcheck="false"></textarea>
+        </label>
+
+        <label class="feld">
+          <span class="feld__name">Zubereitung</span>
+          <span class="feld__tipp">Ein Arbeitsschritt pro Absatz.</span>
+          <textarea id="f-schritte" rows="10"></textarea>
+        </label>
+
+        <label class="feld">
+          <span class="feld__name">Notizen <span class="feld__leise">(frei)</span></span>
+          <textarea id="f-notizen" rows="3" placeholder="Beim nächsten Mal weniger Zucker …"></textarea>
+        </label>
+
+        <label class="feld">
+          <span class="feld__name">Quelle <span class="feld__leise">(frei)</span></span>
+          <input type="text" id="f-quelle" placeholder="Kochbuch, Webseite, von Oma …">
+        </label>
+
+        <div class="formular__fuss">
+          <button type="submit" class="knopf knopf--voll">Rezept speichern</button>
+          <button type="button" class="knopf knopf--leise" data-zurueck>Verwerfen</button>
+        </div>
+        <p class="fehler" id="formular-fehler" hidden></p>
+      </form>
+    </section>
+
+  </main>
+</div>
+
+<script src="./app.js"></script>
+</body>
+</html>
