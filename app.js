@@ -161,23 +161,45 @@ function kategorieRaten(titel, zutaten, schritte) {
   // Zutatenliste soll aus einem Braten keine Suppe machen.
   const beiwerk = ' ' + [...(zutaten || []), ...(schritte || [])].join(' ').toLowerCase();
 
-  let beste = 'sonstiges';
+  // Im Deutschen steht das Gericht am Ende des Namens: eine
+  // "Béchamel-Hackfleisch-Lasagne" ist eine Lasagne, keine Soße. Deshalb
+  // gewinnt im Kopf nicht, wer die meisten Treffer hat, sondern wessen
+  // Schlagwort am spätesten endet. Bei Gleichstand das längere, weil
+  // genauere Wort: "Zwiebelkuchen" schlägt "kuchen".
+  let besterKopf = null;
+  let bestEnde = -1;
+  let bestLaenge = -1;
+
+  // Nur wenn der Name gar nichts hergibt, zählen Nachsatz und Zutaten.
+  let besteAushilfe = 'sonstiges';
   let bestPunkte = 0;
 
   for (const kat of KATEGORIEN) {
     if (!kat.muster.length) continue;
-    let imKopf = 0;
     let imSchwanz = 0;
     let imBeiwerk = 0;
-    for (const m of kat.muster) {
-      if (m.test(kopf)) imKopf++;
-      else if (m.test(schwanz)) imSchwanz++;
-      else if (m.test(beiwerk)) imBeiwerk++;
+
+    for (let i = 0; i < kat.muster.length; i++) {
+      const muster = kat.muster[i];
+      const treffer = muster.exec(kopf);
+      if (treffer) {
+        const ende = treffer.index + treffer[0].length;
+        const laenge = kat.worte[i].length;
+        if (ende > bestEnde || (ende === bestEnde && laenge > bestLaenge)) {
+          bestEnde = ende;
+          bestLaenge = laenge;
+          besterKopf = kat.key;
+        }
+      } else if (muster.test(schwanz)) imSchwanz++;
+      else if (muster.test(beiwerk)) imBeiwerk++;
     }
-    const punkte = Math.min(imKopf, 2) * 12 + Math.min(imSchwanz, 2) * 4 + Math.min(imBeiwerk, 4);
-    if (punkte > bestPunkte) { bestPunkte = punkte; beste = kat.key; }
+
+    const punkte = Math.min(imSchwanz, 2) * 4 + Math.min(imBeiwerk, 4);
+    if (punkte > bestPunkte) { bestPunkte = punkte; besteAushilfe = kat.key; }
   }
-  return bestPunkte >= 3 ? beste : 'sonstiges';
+
+  if (besterKopf) return besterKopf;
+  return bestPunkte >= 3 ? besteAushilfe : 'sonstiges';
 }
 
 /* ── Mengen lesen und schreiben ─────────────────────── */
@@ -501,6 +523,187 @@ function grauUndKontrast(stift, breite, hoehe) {
 async function bildAlsBlob(quelle, zielKante = 1200) {
   const leinwand = await bildAufLeinwand(quelle, zielKante, false);
   return new Promise(gut => leinwand.toBlob(gut, 'image/jpeg', 0.78));
+}
+
+/* ── KI-Erkennung ───────────────────────────────────────
+   Claude liest das Foto und gibt das Rezept fertig sortiert
+   zurück — inklusive Handschrift, die die einfache
+   Texterkennung grundsätzlich nicht kann.
+
+   Der Aufruf geht direkt aus dem Browser an die API. Das
+   erlaubt sie nur mit der Kopfzeile
+   "anthropic-dangerous-direct-browser-access" — der Name ist
+   die Warnung: Der Schlüssel liegt damit auf dem Gerät und
+   ist für niemanden geheim, der davorsitzt. Für ein
+   Familien-Kochbuch mit Ausgabenlimit ist das in Ordnung,
+   für eine öffentliche App wäre es das nicht.
+
+   Der Schlüssel steht deshalb NICHT im Code, sondern wird in
+   den Einstellungen eingetragen und bleibt im localStorage.
+   ────────────────────────────────────────────────────── */
+
+const KI_API = 'https://api.anthropic.com/v1/messages';
+const KI_MODELL = 'claude-opus-4-8';
+const KI_SCHLUESSEL_FACH = 'muemmelkueche.schluessel';
+const KI_KOSTEN_FACH = 'muemmelkueche.kosten';
+
+// Preise für Opus 4.8 in US-Dollar je 1 Million Token (Stand 17.07.2026).
+// Nur für die Anzeige — abgerechnet wird ohnehin von Anthropic.
+const KI_PREIS = { ein: 5, aus: 25, cacheLesen: 0.5, cacheSchreiben: 6.25 };
+
+const kiSchluessel = () => {
+  try { return localStorage.getItem(KI_SCHLUESSEL_FACH) || ''; } catch { return ''; }
+};
+
+/** Fester Bauplan der Antwort — so kann nichts anderes zurückkommen als ein Rezept. */
+const KI_SCHEMA = {
+  type: 'object',
+  properties: {
+    titel: { type: 'string' },
+    portionen: { type: 'integer' },
+    einheit: { type: 'string', enum: ['Portionen', 'Personen', 'Stück', 'Gläser', 'Blech'] },
+    kategorie: { type: 'string', enum: KATEGORIEN.map(k => k.key) },
+    zutaten: { type: 'array', items: { type: 'string' } },
+    schritte: { type: 'array', items: { type: 'string' } },
+    notizen: { type: 'string' }
+  },
+  required: ['titel', 'portionen', 'einheit', 'kategorie', 'zutaten', 'schritte', 'notizen'],
+  additionalProperties: false
+};
+
+const KI_AUFTRAG = `Du liest Rezepte von Fotos und Screenshots ab und gibst sie strukturiert zurück.
+
+Regeln:
+- Mehrere Bilder gehören immer zu EINEM Rezept und kommen in der richtigen Reihenfolge. Setz sie zusammen. Was sich überlappt, nur einmal übernehmen.
+- Mengen und Einheiten genau so übernehmen, wie sie dastehen. Nichts umrechnen, nichts vereinheitlichen. "1/2 TL" bleibt "1/2 TL".
+- Eine Zutat pro Eintrag, in der Schreibweise der Vorlage: "250 g Mehl".
+- Gliedert die Vorlage die Zutaten in Abschnitte, dann bilde diese Gliederung vollständig ab: Übernimm jede Abschnittsüberschrift wortgleich als eigenen Eintrag mit Doppelpunkt am Ende, an genau der Stelle der Liste, an der sie steht. Ohne diese Trennung weiß beim Kochen niemand, welche Zutat wozu gehört — das ist der wichtigste Teil deiner Arbeit.
+  Das gilt unabhängig davon, wie die Überschriften lauten und wie sie gesetzt sind: ob "Für den Teig" oder nur "Teig", ob "Rub", "Marinade", "Guss", "Sud", "Beilage" oder etwas ganz anderes; ob sie fett, unterstrichen, eingerückt, in einem Kasten oder auf einer eigenen Seite stehen. Schreib die Überschrift so, wie sie dasteht, und häng nur den Doppelpunkt an: aus "Rub" wird "Rub:".
+- Erfinde keinen Abschnitt, den es nicht gibt, und lass keinen weg. Hat die Vorlage nur eine einzige Zutatenliste ohne Gliederung, dann setz auch keine Überschrift.
+- Zutaten, die vor dem ersten Abschnitt stehen und zu keinem gehören (etwa das Fleisch selbst), kommen ohne Überschrift an den Anfang.
+- Ein Arbeitsschritt pro Eintrag, ohne Nummer davor.
+- Steht keine Portionszahl da, schätz sie aus den Mengen und wähl die passende Einheit (ein Kuchen ist "Blech" oder "Stück", eine Suppe "Portionen").
+- kategorie: aus der vorgegebenen Liste wählen. Bei Namen der Form "X mit Y" zählt X: "Hirschfilet mit Kartoffelgratin" ist Braten, nicht Auflauf.
+- notizen: nur handschriftliche Ergänzungen am Rand oder Hinweise wie "schmeckt aufgewärmt besser". Sonst leer lassen.
+- Handschrift so genau wie möglich lesen. Bist du bei einem Wort oder einer Zahl unsicher, schreib deine beste Vermutung und häng ein "?" an — dann fällt es beim Prüfen auf.
+- Nichts erfinden und nichts ergänzen. Was nicht auf dem Bild steht, steht nicht im Rezept.`;
+
+/** Skaliert auf die größte Kante, die Opus 4.8 in voller Auflösung nutzt. */
+async function bildFuerKi(datei) {
+  const leinwand = await bildAufLeinwand(datei, 2576, false);
+  const blob = await new Promise(gut => leinwand.toBlob(gut, 'image/jpeg', 0.85));
+  const text = await blobZuText(blob);
+  return {
+    type: 'image',
+    source: { type: 'base64', media_type: 'image/jpeg', data: text.split(',')[1] }
+  };
+}
+
+function kiKostenAus(verbrauch) {
+  const v = verbrauch || {};
+  return ((v.input_tokens || 0) * KI_PREIS.ein
+    + (v.output_tokens || 0) * KI_PREIS.aus
+    + (v.cache_read_input_tokens || 0) * KI_PREIS.cacheLesen
+    + (v.cache_creation_input_tokens || 0) * KI_PREIS.cacheSchreiben) / 1e6;
+}
+
+function kiKostenBuchen(dollar) {
+  try {
+    const alt = JSON.parse(localStorage.getItem(KI_KOSTEN_FACH) || '{"summe":0,"anzahl":0}');
+    const neu = { summe: (alt.summe || 0) + dollar, anzahl: (alt.anzahl || 0) + 1 };
+    localStorage.setItem(KI_KOSTEN_FACH, JSON.stringify(neu));
+    return neu;
+  } catch {
+    return { summe: dollar, anzahl: 1 };
+  }
+}
+
+/** Übersetzt die Fehler der API in etwas, das in einer Küche weiterhilft. */
+function kiFehlerText(status, koerper) {
+  const meldung = koerper?.error?.message || '';
+  if (status === 401) return 'Der Schlüssel wird nicht akzeptiert. Bitte in den Einstellungen prüfen — er beginnt mit „sk-ant-".';
+  if (status === 403) return 'Der Schlüssel darf dieses Modell nicht benutzen.';
+  if (status === 429) return 'Gerade zu viele Anfragen. Warte einen Moment und versuch es noch einmal.';
+  if (status === 400 && /credit|balance|quota/i.test(meldung)) {
+    return 'Das Anthropic-Konto hat kein Guthaben mehr. Unter console.anthropic.com aufladen.';
+  }
+  if (status === 400) return 'Die Anfrage wurde abgelehnt: ' + (meldung || 'unbekannter Grund');
+  if (status === 529 || status >= 500) return 'Der Dienst ist gerade überlastet. Gleich noch einmal versuchen.';
+  return 'Die Erkennung ist fehlgeschlagen (Fehler ' + status + '). ' + meldung;
+}
+
+/** Liest ein Rezept von einem oder mehreren Bildern. */
+async function kiRezeptLesen(dateien, melde) {
+  const schluessel = kiSchluessel();
+  if (!schluessel) throw new Error('Kein Schlüssel eingetragen.');
+
+  const bilder = [];
+  for (let i = 0; i < dateien.length; i++) {
+    melde(dateien.length > 1
+      ? 'Bild ' + (i + 1) + ' von ' + dateien.length + ' wird vorbereitet …'
+      : 'Bild wird vorbereitet …', 0.05 + (i / dateien.length) * 0.25);
+    bilder.push(await bildFuerKi(dateien[i]));
+  }
+
+  melde(dateien.length > 1
+    ? 'Claude liest die ' + dateien.length + ' Bilder …'
+    : 'Claude liest das Rezept …', null);
+
+  let antwort;
+  try {
+    antwort = await fetch(KI_API, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': schluessel,
+        'anthropic-version': '2023-06-01',
+        // Ohne diese Kopfzeile blockt die API den Aufruf aus dem Browser.
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: KI_MODELL,
+        max_tokens: 16000,
+        // Nachdenken hilft spürbar bei krakeliger Handschrift.
+        thinking: { type: 'adaptive' },
+        output_config: { format: { type: 'json_schema', schema: KI_SCHEMA } },
+        system: KI_AUFTRAG,
+        messages: [{
+          role: 'user',
+          content: [
+            ...bilder,
+            { type: 'text', text: dateien.length > 1
+              ? 'Diese ' + dateien.length + ' Bilder zeigen EIN Rezept. Lies es ab.'
+              : 'Lies das Rezept auf diesem Bild ab.' }
+          ]
+        }]
+      })
+    });
+  } catch {
+    throw new Error('Keine Verbindung zu Claude. Ist das Gerät online?');
+  }
+
+  const daten = await antwort.json().catch(() => null);
+  if (!antwort.ok) throw new Error(kiFehlerText(antwort.status, daten));
+
+  if (daten.stop_reason === 'refusal') {
+    throw new Error('Claude hat die Bearbeitung abgelehnt. Bei einem Rezept ist das seltsam — versuch ein anderes Bild.');
+  }
+  if (daten.stop_reason === 'max_tokens') {
+    throw new Error('Das Rezept war zu lang für eine Anfrage. Teil es auf weniger Bilder auf.');
+  }
+
+  const textBlock = (daten.content || []).find(b => b.type === 'text');
+  if (!textBlock) throw new Error('Claude hat kein Rezept zurückgegeben.');
+
+  let rezept;
+  try {
+    rezept = JSON.parse(textBlock.text);
+  } catch {
+    throw new Error('Die Antwort war unverständlich. Versuch es noch einmal.');
+  }
+
+  melde('Fertig.', 1);
+  return { rezept, kosten: kiKostenAus(daten.usage) };
 }
 
 /* ── Texterkennung ──────────────────────────────────────
@@ -841,6 +1044,128 @@ function bildUrlLesen(wert, tiefe = 0) {
   return null;
 }
 
+/* ── Zutatengruppen ─────────────────────────────────────
+   Die maschinenlesbaren Daten einer Rezeptseite enthalten nur eine
+   flache Zutatenliste — "Für den Boden:" und "Für die Füllung:"
+   stehen dort nicht drin. In der sichtbaren Tabelle stehen sie sehr
+   wohl. Also: die bekannten Zutaten im Seitenaufbau wiederfinden und
+   die Überschriften dazwischen einsammeln.
+   ────────────────────────────────────────────────────── */
+
+/**
+ * Vergleichsschlüssel für "ist das dieselbe Zutat?".
+ * Leerzeichen fliegen raus, weil im HTML "7 m.-große" direkt an "Ei(er)" klebt.
+ * Klammern fliegen raus, weil die maschinenlesbaren Daten sie setzen, die
+ * sichtbare Tabelle aber nicht: "Zitronenabrieb (z. B. von Dr. Oetker)"
+ * steht dort ohne Klammern.
+ */
+const textSchluessel = s => String(s).toLowerCase().replace(/\s+/g, '').replace(/[()[\]]/g, '');
+
+const KOPF_TAGS = /^(H[2-6]|TH|LEGEND|CAPTION|DT|STRONG|B|SUMMARY)$/;
+const KOPF_KLASSEN = /headline|heading|group|gruppe|subhead|titel|title|section|abschnitt/i;
+
+// Wörter, die eine Zutatenliste überschreiben, aber keine Gruppe benennen.
+// Exakt vergleichen: "Zutaten" ist gesperrt, "Zutaten für den Teig" nicht.
+const KOPF_SPERRE = /^(zutaten|zutat|ingredients|zubereitung|anleitung|schritte|instructions|einkaufsliste|nährwerte|nährwertangaben|zubehör|equipment|menge|einheit|amount|unit|utensilien)\s*:?\s*$/i;
+
+/**
+ * Sieht das nach einer Zwischenüberschrift aus?
+ * `imBlock` sagt, ob das Element innerhalb des Zutatenblocks sitzt. Tut es das,
+ * darf die Überschrift heißen, wie sie will ("Rub", "Teig", "For the dough") —
+ * die Lage im Seitenaufbau verrät ihre Rolle. Außerhalb bleibt es streng, sonst
+ * würde jede Zwischenzeile der Seite zur Gruppe.
+ */
+function istGruppenKopf(el, imBlock) {
+  const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+  if (!text || text.length > 60) return false;
+  if (KOPF_SPERRE.test(text)) return false;
+  if (!/[a-zA-ZÄÖÜäöüß]/.test(text)) return false;
+  // "Zutaten für 12 Portionen" ist die Blocküberschrift, keine Gruppe.
+  if (MARKE_PORTION.test(text)) return false;
+
+  if (!KOPF_TAGS.test(el.tagName) && !KOPF_KLASSEN.test(el.getAttribute('class') || '')) return false;
+
+  return imBlock || /:\s*$/.test(text) || /^(für|zum|zur|for)\b/i.test(text);
+}
+
+/**
+ * Fügt die Zwischenüberschriften wieder in die flache Zutatenliste ein.
+ * Läuft einmal durch den Seitenaufbau und hält dabei einen Zeiger auf die
+ * nächste erwartete Zutat — die Reihenfolge stimmt bei Rezeptseiten überein.
+ */
+function zutatenMitGruppen(doc, flach) {
+  if (flach.length < 2 || !doc.body) return flach;
+  const gesucht = flach.map(textSchluessel);
+
+  // Durchgang 1: Zu jeder Zutat ihre Zeile im Seitenaufbau suchen.
+  // Der erste Knoten, dessen Text genau die Zutat ergibt, ist die Zeile —
+  // der Behälter darüber enthält mehr, die Zelle darunter weniger. Der
+  // kleine Vorgriff macht das tolerant: Schreibt die Seite eine einzelne
+  // Zutat anders als die maschinenlesbaren Daten, kippt nicht alles.
+  const knoten = new Array(flach.length).fill(null);
+  let z = 0;
+  for (const el of doc.body.querySelectorAll('*')) {
+    if (z >= flach.length) break;
+    const hier = textSchluessel(el.textContent || '');
+    if (!hier) continue;
+    for (let i = z; i < Math.min(z + 3, flach.length); i++) {
+      if (gesucht[i] === hier) { knoten[i] = el; z = i + 1; break; }
+    }
+  }
+
+  const gefunden = knoten.filter(Boolean);
+  if (gefunden.length < 2) return flach;
+
+  // Der kleinste gemeinsame Behälter aller Zutaten ist der Zutatenblock.
+  // Was darin als Überschrift steht, ist eine Gruppe — unabhängig davon,
+  // wie sie heißt. Das ist der Unterschied zwischen "erkennt Für den Teig"
+  // und "erkennt die Gliederung".
+  let block = gefunden[0];
+  for (const k of gefunden) {
+    while (block && !block.contains(k)) block = block.parentElement;
+  }
+  if (!block) return flach;
+
+  const istZutat = new Set(gefunden);
+  const raus = [];
+  let zeiger = 0;
+  let offenerKopf = null;
+  let letzterKopf = null;
+  let gruppen = 0;
+
+  // Durchgang 2: Block einmal durchlaufen, Überschriften und Zutaten mischen.
+  for (const el of [block, ...block.querySelectorAll('*')]) {
+    if (zeiger >= flach.length) break;
+
+    if (istZutat.has(el)) {
+      const stelle = knoten.indexOf(el);
+      while (zeiger < stelle) raus.push(flach[zeiger++]);
+
+      if (offenerKopf && offenerKopf !== letzterKopf) {
+        raus.push(/:\s*$/.test(offenerKopf) ? offenerKopf : offenerKopf + ':');
+        letzterKopf = offenerKopf;
+        gruppen++;
+      }
+      offenerKopf = null;
+      raus.push(flach[zeiger++]);
+      continue;
+    }
+
+    // Ein Element, das Zutaten umschließt, ist ein Behälter, keine Überschrift.
+    if (gefunden.some(k => el.contains(k))) continue;
+
+    if (istGruppenKopf(el, true)) {
+      offenerKopf = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+  }
+
+  while (zeiger < flach.length) raus.push(flach[zeiger++]);
+
+  // Mehr Gruppen als halb so viele Zutaten heißt: Da ist etwas schiefgelaufen.
+  if (!gruppen || gruppen > flach.length / 2) return flach;
+  return raus;
+}
+
 function rezeptAusMicrodata(doc) {
   const wurzel = doc.querySelector('[itemtype*="schema.org/Recipe" i]');
   if (!wurzel) return null;
@@ -895,7 +1220,7 @@ function rezeptAusHtml(html, url) {
       titel: titelSaeubern(nurText(r.name || '') || doc.title || '', r.author),
       portionen: stand.portionen,
       einheit: stand.einheit,
-      zutaten,
+      zutaten: zutatenMitGruppen(doc, zutaten),
       schritte: anweisungenLesen(r.recipeInstructions),
       bildUrl: bildUrlLesen(r.image),
       quelle: url,
@@ -943,7 +1268,8 @@ const stand = {
   suche: '',
   aktuell: null,
   zielPortionen: null,
-  entwurf: null
+  entwurf: null,
+  mahnungWeg: false
 };
 
 let verlauf = [{ ansicht: 'liste' }];
@@ -974,7 +1300,7 @@ function sterneAnzeigen(wert) {
 
 /* ── Navigation ─────────────────────────────────────── */
 
-const ANSICHTEN = ['liste', 'rezept', 'neu', 'formular'];
+const ANSICHTEN = ['liste', 'rezept', 'neu', 'formular', 'einstellungen'];
 
 function ansichtZeigen(name) {
   for (const a of ANSICHTEN) {
@@ -1113,6 +1439,7 @@ function listeZeichnen() {
 
   const garNichts = stand.rezepte.length === 0;
   $('#leer-hinweis').hidden = !garNichts;
+  mahnungZeichnen();
 
   if (!liste.length && !garNichts) {
     const nichts = el('p', 'beischrift', stand.suche
@@ -1385,7 +1712,7 @@ function kategorienInAuswahl() {
   }
 }
 
-function formularOeffnen(entwurf, modus) {
+function formularOeffnen(entwurf, modus, hinweis) {
   stand.entwurf = entwurf;
 
   $('#formular-titel').textContent = modus === 'bearbeiten' ? 'Rezept bearbeiten'
@@ -1393,11 +1720,11 @@ function formularOeffnen(entwurf, modus) {
     : modus === 'strukturiert' ? 'Rezept übernehmen'
     : 'Neues Rezept';
 
-  $('#formular-hinweis').textContent =
-    modus === 'geraten' ? 'So habe ich das gelesen. Die Texterkennung verhört sich gern — schau bitte drüber, vor allem bei den Mengen.'
+  $('#formular-hinweis').textContent = hinweis
+    || (modus === 'geraten' ? 'So habe ich das gelesen — schau bitte drüber, vor allem bei den Mengen.'
     : modus === 'strukturiert' ? 'Von der Seite übernommen. Ein prüfender Blick schadet trotzdem nicht.'
     : modus === 'bearbeiten' ? ''
-    : 'Trag ein, was du hast. Ändern kannst du später alles.';
+    : 'Trag ein, was du hast. Ändern kannst du später alles.');
 
   $('#f-titel').value = entwurf.titel || '';
   $('#f-kategorie').value = entwurf.kategorie || 'sonstiges';
@@ -1468,10 +1795,21 @@ function arbeitZeigen(an) {
   if (!an) $('#arbeit-fuell').style.width = '0%';
 }
 
+/** anteil = null bedeutet: Dauer unbekannt, Balken läuft durch. */
 function melden(text, anteil) {
   $('#arbeit-text').textContent = text;
-  if (anteil != null) $('#arbeit-fuell').style.width = Math.round(anteil * 100) + '%';
+  const fuell = $('#arbeit-fuell');
+  if (anteil == null) {
+    fuell.classList.add('arbeit__fuell--laeuft');
+    fuell.style.width = '100%';
+  } else {
+    fuell.classList.remove('arbeit__fuell--laeuft');
+    fuell.style.width = Math.round(anteil * 100) + '%';
+  }
 }
+
+const centText = dollar =>
+  '≈ ' + (dollar * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' US-Cent';
 
 function neuFehler(text) {
   const knoten = $('#neu-fehler');
@@ -1479,23 +1817,81 @@ function neuFehler(text) {
   knoten.hidden = !text;
 }
 
-async function fotoVerarbeiten(datei) {
+/** Fotos zu einem Rezept machen — mit Claude, wenn ein Schlüssel da ist, sonst per Texterkennung. */
+async function fotoVerarbeiten(dateiListe) {
   neuFehler('');
   arbeitZeigen(true);
 
+  // Kameradateien heißen IMG_0041, IMG_0042 … — nach Namen sortiert stimmt
+  // die Reihenfolge der Buchseiten, egal wie die Auswahl sie liefert.
+  const bilder = [...dateiListe].sort((a, b) =>
+    String(a.name).localeCompare(String(b.name), 'de', { numeric: true }));
+
   try {
-    const text = await textErkennen(datei, melden);
-
-    if (!text.trim() || text.trim().length < 25) {
-      throw new Error('Auf dem Bild war kaum Text zu erkennen. Versuch es mit einem schärferen Foto bei gutem Licht — oder trag das Rezept von Hand ein.');
-    }
-
-    melden('Rezept wird sortiert …', 0.97);
-    const geraten = textZuRezept(text);
-    const bild = await bildAlsBlob(datei);
+    const entwurf = kiSchluessel()
+      ? await entwurfPerKi(bilder)
+      : await entwurfPerTexterkennung(bilder);
 
     arbeitZeigen(false);
-    formularOeffnen({
+    formularOeffnen(entwurf.daten, 'geraten', entwurf.hinweis);
+  } catch (fehler) {
+    arbeitZeigen(false);
+    neuFehler(fehler.message || 'Das Bild ließ sich nicht lesen.');
+  }
+}
+
+async function entwurfPerKi(bilder) {
+  const { rezept, kosten } = await kiRezeptLesen(bilder, melden);
+
+  if (!rezept.zutaten || !rezept.zutaten.length) {
+    throw new Error('Auf den Bildern war kein Rezept zu erkennen. Ist wirklich eins drauf?');
+  }
+
+  const stand = kiKostenBuchen(kosten);
+  const unsicher = [...(rezept.zutaten || []), ...(rezept.schritte || [])]
+    .some(z => String(z).includes('?'));
+
+  return {
+    daten: {
+      titel: rezept.titel || 'Neues Rezept',
+      kategorie: KAT_NACH_KEY[rezept.kategorie] ? rezept.kategorie : 'sonstiges',
+      portionen: Math.max(1, Math.min(99, rezept.portionen || 4)),
+      einheit: rezept.einheit || 'Portionen',
+      zutaten: rezept.zutaten,
+      schritte: rezept.schritte || [],
+      notizen: rezept.notizen || '',
+      quelle: bilder.length > 1 ? bilder.length + ' Fotos' : 'Foto',
+      bild: await bildAlsBlob(bilder[0])
+    },
+    hinweis: 'Von Claude gelesen (' + centText(kosten) + '; bisher '
+      + stand.anzahl + (stand.anzahl === 1 ? ' Rezept für ' : ' Rezepte für ')
+      + centText(stand.summe) + '). '
+      + (unsicher
+        ? 'Bei den Stellen mit „?" war sich Claude unsicher — die bitte besonders ansehen.'
+        : 'Ein prüfender Blick auf die Mengen schadet trotzdem nie.')
+  };
+}
+
+async function entwurfPerTexterkennung(bilder) {
+  let text = '';
+  for (let i = 0; i < bilder.length; i++) {
+    const von = i / bilder.length;
+    const bis = (i + 1) / bilder.length;
+    const teil = await textErkennen(bilder[i], (t, a) =>
+      melden(bilder.length > 1 ? 'Bild ' + (i + 1) + ' von ' + bilder.length + ': ' + t : t,
+        a == null ? null : von + a * (bis - von)));
+    text += (text ? '\n' : '') + teil;
+  }
+
+  if (text.trim().length < 25) {
+    throw new Error('Auf dem Bild war kaum Text zu erkennen. Versuch es mit einem schärferen Foto bei gutem Licht — oder trag das Rezept von Hand ein.');
+  }
+
+  melden('Rezept wird sortiert …', 0.97);
+  const geraten = textZuRezept(text);
+
+  return {
+    daten: {
       titel: geraten.titel,
       kategorie: kategorieRaten(geraten.titel, geraten.zutaten, geraten.schritte),
       portionen: geraten.portionen || 4,
@@ -1503,13 +1899,11 @@ async function fotoVerarbeiten(datei) {
       zutaten: geraten.zutaten,
       schritte: geraten.schritte,
       notizen: '',
-      quelle: 'Foto',
-      bild
-    }, 'geraten');
-  } catch (fehler) {
-    arbeitZeigen(false);
-    neuFehler(fehler.message || 'Das Bild ließ sich nicht lesen.');
-  }
+      quelle: bilder.length > 1 ? bilder.length + ' Fotos' : 'Foto',
+      bild: await bildAlsBlob(bilder[0])
+    },
+    hinweis: 'So habe ich das gelesen. Die Texterkennung verhört sich gern — schau bitte drüber, vor allem bei den Mengen.'
+  };
 }
 
 async function linkVerarbeiten(adresse) {
@@ -1591,7 +1985,147 @@ function textVerarbeiten(roh) {
   }, 'geraten');
 }
 
-/* ── Sicherung ──────────────────────────────────────── */
+/* ── Einstellungen ──────────────────────────────────── */
+
+function einstellungenZeichnen() {
+  const hat = !!kiSchluessel();
+
+  const liste = $('#verfahren-liste');
+  liste.textContent = '';
+
+  const machKarte = (an, titel, text) => {
+    const karte = el('div', 'verfahren__karte' + (an ? ' verfahren__karte--an' : ''));
+    karte.append(el('span', 'verfahren__marke', an ? '● Wird benutzt' : 'aus'));
+    karte.append(el('h4', 'verfahren__titel', titel));
+    karte.append(el('p', 'verfahren__text', text));
+    return karte;
+  };
+
+  liste.append(machKarte(hat, 'Claude liest mit',
+    'Liest auch Handschrift, schiefe Fotos und Seiten im Schatten. Erkennt „Für den Teig" von allein und setzt die Kategorie selbst. Kostet ungefähr 5 US-Cent pro Rezept und braucht Netz.'));
+  liste.append(machKarte(!hat, 'Texterkennung auf dem Gerät',
+    'Kostenlos, offline, kein Konto. Liest sauber gedruckten Text ordentlich — Handschrift gar nicht.'));
+
+  $('#f-schluessel').value = '';
+  $('#schluessel-fehler').hidden = true;
+
+  const stand = $('#schluessel-stand');
+  if (!hat) {
+    stand.textContent = 'Zurzeit ist kein Schlüssel hinterlegt — Fotos werden auf dem Gerät gelesen.';
+    return;
+  }
+
+  const s = kiSchluessel();
+  let text = 'Hinterlegt: sk-ant-…' + s.slice(-4) + '.';
+  try {
+    const k = JSON.parse(localStorage.getItem(KI_KOSTEN_FACH) || '{"summe":0,"anzahl":0}');
+    if (k.anzahl) {
+      text += ' Bisher ' + k.anzahl + (k.anzahl === 1 ? ' Rezept' : ' Rezepte')
+        + ' gelesen, zusammen ' + centText(k.summe) + '.';
+    }
+  } catch { /* Anzeige ist Beiwerk */ }
+  stand.textContent = text;
+}
+
+/** Zeigt am Foto-Knopf, was gerade passieren würde. */
+function verfahrenMarkeZeichnen() {
+  const marke = $('#foto-verfahren');
+  if (!marke) return;
+  const hat = !!kiSchluessel();
+  marke.textContent = hat ? 'Claude liest mit — auch Handschrift' : 'Texterkennung auf dem Gerät — keine Handschrift';
+  marke.className = 'weg__marke' + (hat ? ' weg__marke--ki' : '');
+}
+
+function schluesselSichern() {
+  const feld = $('#f-schluessel');
+  const fehler = $('#schluessel-fehler');
+  const wert = feld.value.trim();
+
+  if (!wert) { fehler.textContent = 'Da steht noch nichts.'; fehler.hidden = false; return; }
+  if (!/^sk-ant-\S{20,}$/.test(wert)) {
+    fehler.textContent = 'Das sieht nicht nach einem Claude-Schlüssel aus. Er beginnt mit „sk-ant-" und ist deutlich länger.';
+    fehler.hidden = false;
+    return;
+  }
+
+  try {
+    localStorage.setItem(KI_SCHLUESSEL_FACH, wert);
+  } catch {
+    fehler.textContent = 'Der Schlüssel ließ sich nicht speichern. Ist der Browser-Speicher gesperrt?';
+    fehler.hidden = false;
+    return;
+  }
+
+  einstellungenZeichnen();
+  verfahrenMarkeZeichnen();
+  $('#schluessel-stand').textContent = 'Gespeichert ✓ ' + $('#schluessel-stand').textContent;
+}
+
+function schluesselLoeschen() {
+  if (!kiSchluessel()) return;
+  if (!confirm('Schlüssel entfernen? Fotos werden dann wieder auf dem Gerät gelesen — ohne Handschrift.')) return;
+  try { localStorage.removeItem(KI_SCHLUESSEL_FACH); } catch { /* egal */ }
+  einstellungenZeichnen();
+  verfahrenMarkeZeichnen();
+}
+
+/* ── Sicherung ──────────────────────────────────────────
+   Ein Browser darf keine Dateien von allein aufs Gerät
+   schreiben — weder beim Start noch sonst. Auf Android gibt
+   es dafür überhaupt keinen Weg (die File System Access API
+   kennt kein mobiler Browser). Deshalb erinnert die App,
+   statt es heimlich zu versuchen.
+   ────────────────────────────────────────────────────── */
+
+const SICHERUNG_FACH = 'muemmelkueche.letzteSicherung';
+
+function letzteSicherung() {
+  try { return JSON.parse(localStorage.getItem(SICHERUNG_FACH) || 'null'); } catch { return null; }
+}
+
+function sicherungBuchen() {
+  try { localStorage.setItem(SICHERUNG_FACH, JSON.stringify({ zeit: Date.now() })); } catch { /* egal */ }
+  mahnungZeichnen();
+}
+
+/** Wie viele Rezepte haben sich seit der letzten Sicherung geändert? */
+function ungesichertZahl() {
+  const s = letzteSicherung();
+  const seit = s ? s.zeit : 0;
+  return stand.rezepte.filter(r => (r.geaendert || r.angelegt || 0) > seit).length;
+}
+
+const TAG = 86400000;
+
+function mahnungZeichnen() {
+  const kasten = $('#mahnung');
+  if (!kasten) return;
+
+  const offen = ungesichertZahl();
+  const s = letzteSicherung();
+  const tage = s ? Math.floor((Date.now() - s.zeit) / TAG) : Infinity;
+
+  // Beim allerersten Rezept sofort erinnern (tage ist dann unendlich): Dann
+  // lernt sie früh, dass die Rezepte nur hier liegen — solange wenig auf dem
+  // Spiel steht. Danach nicht mehr bei jeder Kleinigkeit nerven: erst ab drei
+  // Änderungen, oder wenn die letzte Sicherung zwei Wochen her ist.
+  // Hat sich seit der Sicherung nichts getan, bleibt sie immer still.
+  const noetig = offen >= 3 || (offen >= 1 && tage >= 14);
+  if (!noetig || stand.mahnungWeg) { kasten.hidden = true; return; }
+
+  $('#mahnung-titel').textContent = s
+    ? offen + (offen === 1 ? ' Rezept ist ungesichert.' : ' Rezepte sind ungesichert.')
+    : 'Noch nie gesichert.';
+
+  $('#mahnung-satz').textContent = s
+    ? 'Letzte Sicherung vor ' + (tage === 0 ? 'weniger als einem Tag' : tage === 1 ? 'einem Tag' : tage + ' Tagen')
+      + '. Die Rezepte liegen nur auf diesem Gerät.'
+    : 'Die Rezepte liegen nur auf diesem Gerät. Löscht der Browser seine Daten, sind sie weg.';
+
+  kasten.hidden = false;
+}
+
+/* ── Sicherung schreiben ────────────────────────────── */
 
 const blobZuText = blob => new Promise(gut => {
   const leser = new FileReader();
@@ -1619,14 +2153,32 @@ async function sicherungSpeichern() {
   }
 
   const blob = new Blob([JSON.stringify(paket)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
   const heute = new Date().toISOString().slice(0, 10);
+  const name = 'muemmelkueche-' + heute + '.json';
 
+  // Auf dem Handy führt der Teilen-Dialog die Datei mit einem Tipp nach
+  // Google Drive oder in eine Mail — dort liegt sie sicherer als im
+  // Download-Ordner desselben Geräts, das kaputtgehen kann.
+  const datei = new File([blob], name, { type: 'application/json' });
+  if (navigator.canShare && navigator.canShare({ files: [datei] })) {
+    try {
+      await navigator.share({ files: [datei], title: 'Mones Mümmelküche — Sicherung' });
+      sicherungBuchen();
+      return;
+    } catch (fehler) {
+      // Abgebrochen heißt: nicht gesichert. Nicht als erledigt verbuchen.
+      if (fehler && fehler.name === 'AbortError') return;
+      // Alles andere: normal herunterladen.
+    }
+  }
+
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'muemmelkueche-' + heute + '.json';
+  link.download = name;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  sicherungBuchen();
 }
 
 async function sicherungLaden(datei) {
@@ -1700,13 +2252,23 @@ function verdrahten() {
     kategorienZeichnen();
   });
 
-  // Weg 1: Foto
+  // Weg 1: Fotos
   $('#weg-foto').addEventListener('click', () => $('#datei-foto').click());
   $('#datei-foto').addEventListener('change', ereignis => {
-    const datei = ereignis.target.files[0];
+    const dateien = [...ereignis.target.files];
     ereignis.target.value = '';
-    if (datei) fotoVerarbeiten(datei);
+    if (dateien.length) fotoVerarbeiten(dateien);
   });
+
+  // Einstellungen
+  $('#knopf-einstellungen').addEventListener('click', () => {
+    leisteSchliessen();
+    einstellungenZeichnen();
+    navigieren({ ansicht: 'einstellungen' });
+    ansichtZeigen('einstellungen');
+  });
+  $('#schluessel-sichern').addEventListener('click', schluesselSichern);
+  $('#schluessel-loeschen').addEventListener('click', schluesselLoeschen);
 
   // Weg 2: Link
   $('#weg-link').addEventListener('click', () => {
@@ -1739,6 +2301,12 @@ function verdrahten() {
 
   // Sicherung
   $('#knopf-export').addEventListener('click', sicherungSpeichern);
+  $('#mahnung-sichern').addEventListener('click', sicherungSpeichern);
+  $('#mahnung-weg').addEventListener('click', () => {
+    // Nur für diesen Besuch weg — beim nächsten Öffnen fragt sie wieder.
+    stand.mahnungWeg = true;
+    mahnungZeichnen();
+  });
   $('#knopf-import').addEventListener('click', () => $('#datei-sicherung').click());
   $('#datei-sicherung').addEventListener('change', ereignis => {
     const datei = ereignis.target.files[0];
@@ -1796,6 +2364,7 @@ async function starten() {
 
   kategorienZeichnen();
   listeZeichnen();
+  verfahrenMarkeZeichnen();
   geteiltesAufnehmen();
 
   if ('serviceWorker' in navigator) {

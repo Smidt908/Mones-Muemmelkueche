@@ -13,13 +13,21 @@ hochgeladen.
 
 **Rezepte aufnehmen — auf vier Wegen**
 
-- **Foto oder Screenshot.** Die Seite aus dem Kochbuch abfotografieren. Die App
-  liest den Text, sortiert ihn in Titel, Portionen, Zutaten und Schritte und
-  legt das Ergebnis zum Prüfen vor.
+- **Fotos oder Screenshots.** Die Seite aus dem Kochbuch abfotografieren —
+  **mehrere Bilder gehen**, sie werden zu einem Rezept zusammengesetzt (sortiert
+  nach Dateinamen, also in Aufnahmereihenfolge). Das Ergebnis kommt zum Prüfen
+  ins Formular. Zwei Verfahren, umschaltbar unter *Einstellungen*:
+  - **Mit Claude-Schlüssel** (empfohlen): liest **auch Handschrift**, schiefe
+    Fotos und Seiten im Schatten, erkennt Zutatengruppen und die Kategorie von
+    allein. Kostet ~5 US-Cent pro Rezept, braucht Netz. Unsichere Stellen
+    markiert Claude mit einem `?`.
+  - **Ohne Schlüssel**: Texterkennung auf dem Gerät, kostenlos und offline —
+    aber **Handschrift kann sie grundsätzlich nicht**.
 - **Link.** Adresse einer Rezeptseite einfügen. Chefkoch, EAT SMARTER und die
   meisten anderen hinterlegen ihre Rezepte maschinenlesbar im Quelltext — die
-  übernimmt die App vollständig und genau. **Dieser Weg hängt aber an fremden
-  Diensten und fällt gelegentlich aus** (siehe unten).
+  übernimmt die App vollständig und genau, **samt Zutatengruppen** („Für den
+  Boden:", „Für die Füllung:"). **Dieser Weg hängt aber an fremden Diensten und
+  fällt gelegentlich aus** (siehe unten).
 - **Rezepttext einfügen.** Auf der Rezeptseite alles markieren (Strg+A),
   kopieren, einfügen. Die App sucht sich Titel, Portionen, Zutaten und Schritte
   selbst heraus und wirft Navigation, Sternchen und Kommentare weg. Dieser Weg
@@ -41,7 +49,8 @@ die Einheit, wenn es sich besser liest:
 
 Zeilen ohne Menge (`Salz und Pfeffer`) bleiben unangetastet. Eine Zeile mit
 Doppelpunkt am Ende (`Für den Teig:`) wird zur Zwischenüberschrift und nicht
-mitgerechnet.
+mitgerechnet — so bleibt beim Umrechnen erkennbar, welche Zutat zum Boden und
+welche zur Füllung gehört.
 
 **Kategorien.** Die App ordnet jedes Rezept selbst ein — von Frühstück über
 Suppe, Eintopf, Braten und Auflauf bis Kuchen, Torte und Eingemachtes
@@ -121,22 +130,65 @@ kein Server. Das hat zwei Folgen:
   aber verlassen sollte man sich darauf nicht.
 
 *Sicherung speichern* schreibt eine JSON-Datei mit allen Rezepten samt Bildern.
-*Sicherung laden* fügt sie wieder ein: Bekanntes wird aufgefrischt, Neues
-kommt dazu — es geht nichts verloren.
+Auf dem Handy öffnet sich dabei der Teilen-Dialog, die Datei kann also mit einem
+Tipp nach Google Drive oder in eine Mail — dort liegt sie sicherer als im
+Download-Ordner desselben Geräts. *Sicherung laden* fügt sie wieder ein:
+Bekanntes wird aufgefrischt, Neues kommt dazu — es geht nichts verloren.
+
+**Die App erinnert von selbst.** Über der Rezeptliste erscheint ein Hinweis,
+sobald es etwas zu sichern gibt: beim allerersten Rezept, danach ab drei
+Änderungen oder wenn die letzte Sicherung zwei Wochen her ist. Hat sich seit der
+Sicherung nichts getan, bleibt er still. „Später" blendet ihn bis zum nächsten
+Öffnen aus.
+
+> **Warum nicht automatisch?** Weil kein Browser das darf. Eine Webseite kann
+> nicht ungefragt Dateien aufs Gerät schreiben — das ist Absicht, kein Mangel.
+> Die *File System Access API*, mit der eine App nach einmaliger Auswahl still
+> in dieselbe Datei schreiben könnte, unterstützt **kein einziger mobiler
+> Browser** (Chrome für Android, Safari iOS, Firefox mobile: alle nein). Und der
+> Teilen-Dialog verlangt zwingend einen Fingertipp. Deshalb erinnert die App,
+> statt es heimlich zu versuchen.
 
 ---
 
 ## Was nach außen geht
 
-Die App kommt fast ohne Netz aus. Nur an zwei Stellen nicht:
+Die App kommt weitgehend ohne Netz aus. Nach außen gehen nur:
 
+- **Foto-Import, wenn ein Claude-Schlüssel hinterlegt ist.** Die Bilder gehen an
+  `api.anthropic.com` und werden dort gelesen. Ohne Schlüssel bleibt alles auf
+  dem Gerät (Ordner `ocr/`).
 - **Link-Import.** Der Browser darf fremde Seiten aus Sicherheitsgründen nicht
   direkt lesen. Die Adresse geht deshalb über einen Weiterleitungsdienst
   (`cors.lol`, ersatzweise `allorigins.win`, `codetabs.com`). Dorthin geht
-  ausschließlich die Rezept-Adresse. Ohne Netz funktioniert dieser Weg nicht.
-- **Sonst nichts.** Die Texterkennung liegt vollständig im Ordner `ocr/` und
-  läuft auf dem Gerät. Foto-Import, Texteinfügen und alles Übrige funktionieren
-  offline.
+  ausschließlich die Rezept-Adresse.
+- **Sonst nichts.** Rezepte, Notizen und Bewertungen verlassen das Gerät nie.
+  Texteinfügen, Von-Hand-Eintragen und alles Übrige funktionieren offline.
+
+### Der Claude-Schlüssel
+
+Einrichten unter *Einstellungen*:
+
+1. Auf [console.anthropic.com](https://console.anthropic.com) ein Konto anlegen.
+2. Unter *Billing* Guthaben aufladen (ab ca. 5 $).
+3. Unter *API keys* einen Schlüssel erzeugen und in der App einfügen.
+
+**Bezahlt wird über dieses Konto — nicht über das Gerät, auf dem gekocht wird.**
+Wer kocht, merkt davon nichts. Die App zeigt nach jedem Import die tatsächlichen
+Kosten an (aus den Verbrauchsdaten der API, nicht geschätzt) und summiert sie
+mit.
+
+Grobe Hausnummer bei Opus 4.8: **~5 US-Cent pro Rezept** mit einem Foto, ~10
+Cent mit drei. 100 Rezepte kosten also etwa 5 $.
+
+> ⚠️ **Der Schlüssel liegt im `localStorage` des Browsers.** Er steht *nicht* im
+> Repository — er wird zur Laufzeit eingegeben. Aber wer das Gerät in die Hand
+> bekommt und sich auskennt, kann ihn auslesen. Der direkte Aufruf aus dem
+> Browser verlangt deshalb die Kopfzeile
+> `anthropic-dangerous-direct-browser-access` — der Name ist die Warnung. Für ein
+> Familien-Kochbuch ist das vertretbar; setz im Konto ein **monatliches
+> Ausgabenlimit**, dann ist der Schaden begrenzt. Der Schlüssel lässt sich
+> jederzeit sperren und neu erzeugen.
 
 ---
 
@@ -166,11 +218,15 @@ beim ersten Foto-Import in den Cache und ist danach offline verfügbar.
 
 ## Die Grenzen, ehrlich gesagt
 
-- **Die Texterkennung verhört sich.** Sie arbeitet ohne KI, rein auf Mustern.
-  Bei sauberen Vorlagen liest sie fast fehlerfrei, aber `1 l` wird gern zu `11`,
-  und bei krummen Fotos, Schnörkelschrift oder Text auf Bildern wird es
-  ungenau. Deshalb kommt nach jedem Foto-Import das Prüfformular — es ist
-  Bestandteil des Ablaufs, kein Notbehelf. **Vor allem die Mengen prüfen.**
+- **Prüfen muss man immer.** Egal ob Claude oder Texterkennung: Nach jedem
+  Foto-Import kommt das Formular. Das ist Bestandteil des Ablaufs, kein
+  Notbehelf. **Vor allem die Mengen ansehen.** Claude markiert Stellen, bei
+  denen es sich unsicher war, mit einem `?`.
+- **Die Texterkennung ohne Schlüssel kann keine Handschrift.** Das ist keine
+  Schwäche, die sich wegtunen ließe: Tesseract ist auf Druckschrift trainiert.
+  Bei sauberen Vorlagen liest es fast fehlerfrei (`1 l` wird gern zu `11`), bei
+  Handschrift kommt Unsinn heraus. Wer handgeschriebene Rezepte aufnehmen will,
+  braucht den Claude-Schlüssel.
 - **Der Link-Import ist die wackeligste Stelle.** Nicht wegen der Rezeptseiten
   — die geprüften (Chefkoch, EAT SMARTER) geben ihre Rezepte sauber heraus und
   werden exakt übernommen. Sondern wegen der Weiterleitungsdienste: Der Browser

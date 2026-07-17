@@ -418,6 +418,55 @@ body::before {
   color: var(--tinte-leise);
 }
 
+/* ── Erinnerung an die Sicherung ────────────────────── */
+
+.mahnung {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 13px;
+  align-items: center;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border: 1px solid #e8cf9a;
+  border-left: 5px solid var(--gold);
+  border-radius: var(--rund);
+  background: linear-gradient(#fffdf4, #fff8e8);
+  box-shadow: var(--schatten-klein);
+}
+
+.mahnung__bild { grid-row: 1 / 3; font-size: 1.7rem; line-height: 1; }
+
+.mahnung__text { font-size: .87rem; line-height: 1.5; color: var(--tinte); }
+.mahnung__text strong { display: block; color: #8a6100; }
+.mahnung__text span { color: var(--tinte-leise); }
+
+.mahnung__knoepfe {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+}
+.mahnung__knoepfe .knopf { padding: 8px 15px; font-size: .87rem; }
+
+.mahnung__weg {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--tinte-leise);
+  font: inherit;
+  font-size: .84rem;
+  cursor: pointer;
+}
+.mahnung__weg:hover { background: rgba(0,0,0,.05); color: var(--tinte); }
+
+@media (max-width: 819px) {
+  .mahnung { grid-template-columns: 1fr; gap: 2px; }
+  .mahnung__bild { grid-row: auto; }
+  .mahnung__knoepfe { grid-column: 1; }
+}
+
 /* ── Leerer Zustand ─────────────────────────────────── */
 
 .leer {
@@ -523,6 +572,88 @@ body::before {
   transition: width .3s ease-out;
 }
 .arbeit__text { margin: 8px 0 0; font-size: .86rem; color: var(--tinte-leise); text-align: center; }
+
+/* Wenn die Dauer unbekannt ist (Claude denkt nach), läuft der Balken durch. */
+.arbeit__fuell--laeuft {
+  background: linear-gradient(90deg, var(--rot-blass) 0 25%, var(--rot) 50%, var(--rot-blass) 75% 100%);
+  background-size: 260% 100%;
+  animation: wandern 1.4s linear infinite;
+  transition: none;
+}
+@keyframes wandern { from { background-position: 130% 0; } to { background-position: -130% 0; } }
+@media (prefers-reduced-motion: reduce) { .arbeit__fuell--laeuft { animation: none; background: var(--rot); } }
+
+/* ── Einstellungen ──────────────────────────────────── */
+
+.unterschrift {
+  margin: 18px 0 4px;
+  font-family: var(--schrift-serif);
+  font-size: 1.1rem;
+  color: var(--rot-tief);
+}
+
+.verfahren { display: grid; gap: 10px; margin-top: 10px; }
+
+.verfahren__karte {
+  padding: 13px 15px;
+  border: 1px solid var(--papier-rand);
+  border-radius: var(--rund-klein);
+  background: #fff;
+  opacity: .62;
+}
+.verfahren__karte--an { border-color: var(--rot); background: linear-gradient(#fff, #fffaf6); opacity: 1; }
+
+.verfahren__marke {
+  display: inline-block;
+  margin-bottom: 3px;
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--tinte-leise);
+}
+.verfahren__karte--an .verfahren__marke { color: var(--rot); }
+
+.verfahren__titel {
+  margin: 0 0 3px;
+  font-family: var(--schrift-serif);
+  font-size: 1rem;
+  color: var(--rot-tief);
+}
+.verfahren__text { margin: 0; font-size: .82rem; line-height: 1.5; color: var(--tinte-leise); }
+
+.weg__marke {
+  grid-column: 2;
+  margin-top: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #f0ece5;
+  color: var(--tinte-leise);
+  font-size: .72rem;
+  font-weight: 600;
+  justify-self: start;
+}
+.weg__marke--ki { background: var(--rot-blass); color: var(--rot-tief); }
+
+.ausklapp {
+  margin-top: 18px;
+  border: 1px solid var(--papier-rand);
+  border-radius: var(--rund-klein);
+  background: #fff;
+}
+.ausklapp summary {
+  padding: 11px 14px;
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--rot-tief);
+  cursor: pointer;
+}
+.ausklapp__inhalt { padding: 0 14px 14px; }
+.ausklapp__inhalt .notiz { margin-top: 8px; }
+.ausklapp a { color: var(--rot); }
+
+.schritte-liste { margin: 0; padding-left: 20px; font-size: .84rem; line-height: 1.7; color: var(--tinte-leise); }
+.schritte-liste em { color: var(--tinte); font-style: normal; font-weight: 600; }
 
 /* ── Rezeptansicht ──────────────────────────────────── */
 

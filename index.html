@@ -47,6 +47,7 @@
       <p class="leiste__hinweis" id="speicher-hinweis"></p>
       <button class="knopf knopf--leise" id="knopf-export">Sicherung speichern</button>
       <button class="knopf knopf--leise" id="knopf-import">Sicherung laden</button>
+      <button class="knopf knopf--leise" id="knopf-einstellungen">Einstellungen</button>
       <input type="file" id="datei-sicherung" accept="application/json,.json" hidden>
     </div>
   </aside>
@@ -56,6 +57,21 @@
 
     <!-- Ansicht: Rezeptliste -->
     <section class="ansicht ansicht--an" id="ansicht-liste" aria-label="Rezeptliste">
+
+      <!-- Erinnerung an die Sicherung. Ein Browser darf nicht von allein
+           Dateien schreiben — deshalb erinnert die App, statt es zu tun. -->
+      <div class="mahnung" id="mahnung" hidden>
+        <span class="mahnung__bild" aria-hidden="true">🧺</span>
+        <div class="mahnung__text">
+          <strong id="mahnung-titel"></strong>
+          <span id="mahnung-satz"></span>
+        </div>
+        <div class="mahnung__knoepfe">
+          <button class="knopf" id="mahnung-sichern">Jetzt sichern</button>
+          <button class="mahnung__weg" id="mahnung-weg" aria-label="Hinweis ausblenden">Später</button>
+        </div>
+      </div>
+
       <div class="karte karte--kopf">
         <h2 class="ueberschrift" id="listen-titel">Alle Rezepte</h2>
         <p class="beischrift" id="listen-zahl"></p>
@@ -81,9 +97,10 @@
         <div class="wege">
           <button class="weg" id="weg-foto">
             <span class="weg__bild" aria-hidden="true">📷</span>
-            <span class="weg__titel">Foto oder Screenshot</span>
-            <span class="weg__text">Aus dem Kochbuch abfotografieren oder einen Screenshot
-              auswählen. Die App liest den Text und du besserst nach.</span>
+            <span class="weg__titel">Fotos oder Screenshots</span>
+            <span class="weg__text">Aus dem Kochbuch abfotografieren oder Screenshots auswählen.
+              <strong>Mehrere Bilder gehen</strong> — sie werden zu einem Rezept zusammengesetzt.</span>
+            <span class="weg__marke" id="foto-verfahren"></span>
           </button>
 
           <button class="weg" id="weg-link">
@@ -107,7 +124,7 @@
           </button>
         </div>
 
-        <input type="file" id="datei-foto" accept="image/*" hidden>
+        <input type="file" id="datei-foto" accept="image/*" multiple hidden>
 
         <!-- Linkeingabe -->
         <div class="feld-block" id="link-block" hidden>
@@ -140,6 +157,57 @@
         </div>
 
         <p class="fehler" id="neu-fehler" hidden></p>
+      </div>
+    </section>
+
+    <!-- Ansicht: Einstellungen -->
+    <section class="ansicht" id="ansicht-einstellungen" aria-label="Einstellungen" hidden>
+      <div class="karte">
+        <button class="zurueck" data-zurueck>← Zurück</button>
+        <h2 class="ueberschrift">Einstellungen</h2>
+
+        <h3 class="unterschrift">Rezepte von Fotos lesen</h3>
+        <p class="notiz">Die App kann Fotos auf zwei Wegen lesen:</p>
+
+        <div class="verfahren" id="verfahren-liste"></div>
+
+        <label class="feld" style="margin-top:16px">
+          <span class="feld__name">Claude-Schlüssel</span>
+          <span class="feld__tipp">Beginnt mit <em>sk-ant-</em>. Er bleibt auf diesem Gerät und
+            landet nicht im Internet — außer bei Claude selbst, wenn ein Rezept gelesen wird.</span>
+          <input type="password" id="f-schluessel" placeholder="sk-ant-…" autocomplete="off"
+                 spellcheck="false" inputmode="text">
+        </label>
+
+        <div class="formular__fuss">
+          <button class="knopf" id="schluessel-sichern">Schlüssel speichern</button>
+          <button class="knopf knopf--gefahr" id="schluessel-loeschen">Schlüssel entfernen</button>
+        </div>
+        <p class="fehler" id="schluessel-fehler" hidden></p>
+        <p class="notiz" id="schluessel-stand"></p>
+
+        <details class="ausklapp">
+          <summary>Wie komme ich an einen Schlüssel? Und was kostet das?</summary>
+          <div class="ausklapp__inhalt">
+            <ol class="schritte-liste">
+              <li>Auf <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer">console.anthropic.com</a>
+                  ein Konto anlegen.</li>
+              <li>Unter <em>Billing</em> Guthaben aufladen (ab etwa 5 $).</li>
+              <li>Unter <em>API keys</em> einen Schlüssel erzeugen und hier einfügen.</li>
+            </ol>
+            <p class="notiz">
+              Bezahlt wird über dieses Konto — <strong>nicht</strong> über das Gerät, auf dem gekocht wird.
+              Ein Rezept mit einem Foto kostet ungefähr <strong>5 US-Cent</strong>, mit drei Fotos etwa
+              10 Cent. Im Konto lässt sich ein monatliches Limit setzen, und der Schlüssel kann
+              jederzeit gesperrt werden.
+            </p>
+            <p class="notiz">
+              <strong>Ehrlich gesagt:</strong> Der Schlüssel liegt im Speicher dieses Browsers. Wer das
+              Gerät in die Hand bekommt und sich auskennt, kann ihn auslesen. Für ein Familien-Kochbuch
+              ist das vertretbar — ein Limit im Konto begrenzt den Schaden.
+            </p>
+          </div>
+        </details>
       </div>
     </section>
 
