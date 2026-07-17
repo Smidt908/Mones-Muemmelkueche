@@ -23,11 +23,16 @@ hochgeladen.
     markiert Claude mit einem `?`.
   - **Ohne Schlüssel**: Texterkennung auf dem Gerät, kostenlos und offline —
     aber **Handschrift kann sie grundsätzlich nicht**.
-- **Link.** Adresse einer Rezeptseite einfügen. Chefkoch, EAT SMARTER und die
-  meisten anderen hinterlegen ihre Rezepte maschinenlesbar im Quelltext — die
-  übernimmt die App vollständig und genau, **samt Zutatengruppen** („Für den
-  Boden:", „Für die Füllung:"). **Dieser Weg hängt aber an fremden Diensten und
-  fällt gelegentlich aus** (siehe unten).
+- **Link.** Adresse einer Rezeptseite einfügen — **samt Zutatengruppen** („Für
+  den Boden:", „Für die Füllung:"). Der Ablauf ist immer derselbe, egal ob ein
+  Schlüssel hinterlegt ist:
+  1. **Zuerst kostenlos.** Alle Weiterleitungsdienste werden gleichzeitig
+     angerannt, der erste Treffer gewinnt. Klappt es, sind es die Angaben der
+     Seite selbst — gratis **und** genauer als jedes Ablesen. Claude wird gar
+     nicht erst gefragt.
+  2. **Nur wenn das scheitert** und ein Schlüssel da ist, ruft Claude die Seite
+     serverseitig ab (~9 US-Cent). Ohne Schlüssel kommt stattdessen der Hinweis
+     auf „Rezepttext einfügen".
 - **Rezepttext einfügen.** Auf der Rezeptseite alles markieren (Strg+A),
   kopieren, einfügen. Die App sucht sich Titel, Portionen, Zutaten und Schritte
   selbst heraus und wirft Navigation, Sternchen und Kommentare weg. Dieser Weg
@@ -158,10 +163,11 @@ Die App kommt weitgehend ohne Netz aus. Nach außen gehen nur:
 - **Foto-Import, wenn ein Claude-Schlüssel hinterlegt ist.** Die Bilder gehen an
   `api.anthropic.com` und werden dort gelesen. Ohne Schlüssel bleibt alles auf
   dem Gerät (Ordner `ocr/`).
-- **Link-Import.** Der Browser darf fremde Seiten aus Sicherheitsgründen nicht
-  direkt lesen. Die Adresse geht deshalb über einen Weiterleitungsdienst
-  (`cors.lol`, ersatzweise `allorigins.win`, `codetabs.com`). Dorthin geht
-  ausschließlich die Rezept-Adresse.
+- **Link-Import.** Mit Schlüssel: Nur die Rezept-Adresse geht an
+  `api.anthropic.com`, Claude ruft die Seite dort selbst ab (`web_fetch`, kostet
+  nichts extra — nur die gelesenen Token). Ohne Schlüssel: Die Adresse geht an
+  einen Weiterleitungsdienst (`cors.lol`, ersatzweise `allorigins.win`,
+  `codetabs.com`), weil der Browser fremde Seiten nicht selbst lesen darf.
 - **Sonst nichts.** Rezepte, Notizen und Bewertungen verlassen das Gerät nie.
   Texteinfügen, Von-Hand-Eintragen und alles Übrige funktionieren offline.
 
@@ -227,16 +233,18 @@ beim ersten Foto-Import in den Cache und ist danach offline verfügbar.
   Bei sauberen Vorlagen liest es fast fehlerfrei (`1 l` wird gern zu `11`), bei
   Handschrift kommt Unsinn heraus. Wer handgeschriebene Rezepte aufnehmen will,
   braucht den Claude-Schlüssel.
-- **Der Link-Import ist die wackeligste Stelle.** Nicht wegen der Rezeptseiten
-  — die geprüften (Chefkoch, EAT SMARTER) geben ihre Rezepte sauber heraus und
-  werden exakt übernommen. Sondern wegen der Weiterleitungsdienste: Der Browser
-  darf fremde Seiten nicht selbst lesen, also muss ein fremder Dienst dazwischen,
-  und die sind kostenlos, launisch und sterblich. Beim Prüfen am 17.07.2026 war
-  von vier bekannten Diensten genau einer erreichbar, und der drosselte nach
-  wenigen Anfragen. Für ein paar Rezepte pro Woche reicht das meist — aber wenn
-  es klemmt, ist das der Grund. **Deshalb gibt es „Rezepttext einfügen":
-  gleiches Ergebnis, ohne fremde Dienste.** Die Liste steht in `app.js` unter
-  `BOTEN` und lässt sich austauschen.
+- **Der Link-Import ohne Schlüssel ist die wackeligste Stelle.** Nicht wegen der
+  Rezeptseiten — die geben ihre Rezepte sauber heraus. Sondern wegen der
+  Weiterleitungsdienste: Der Browser darf fremde Seiten nicht selbst lesen, also
+  muss ein fremder Dienst dazwischen, und die sind kostenlos, launisch und
+  sterblich. Am 17.07.2026 wurden **acht** bekannte Dienste an derselben Adresse
+  geprüft — **alle acht fielen aus** (429, 522, 403, 400). Das ist kein Pech
+  mehr, sondern der Konstruktionsfehler dieses Weges.
+  **Deshalb ruft Claude die Seite ab, sobald ein Schlüssel hinterlegt ist** —
+  serverseitig, ohne CORS, ohne fremden Dienst. Die alte Kette (`BOTEN` in
+  `app.js`) bleibt nur als kostenloser Versuch für den Fall ohne Schlüssel.
+  Zweite Rückfallebene bleibt „Rezepttext einfügen": gleiches Ergebnis, ohne
+  jeden fremden Dienst.
 - **Die Kategorie ist geraten.** Nach Schlagwörtern im Titel, hilfsweise in den
   Zutaten. „Kürbissuppe" trifft sie, bei „Mones Sonntagsessen" landet sie bei
   *Sonstiges*. Ändern ist ein Fingertipp.

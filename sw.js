@@ -17,7 +17,7 @@
    unverfälscht durchs Netz gehen.
    ────────────────────────────────────────────────────── */
 
-const CACHE = 'muemmelkueche-v3';
+const CACHE = 'muemmelkueche-v5';
 
 const SCHRANK = [
   './',

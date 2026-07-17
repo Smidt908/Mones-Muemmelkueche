@@ -46,6 +46,7 @@
     <div class="leiste__fuss">
       <p class="leiste__hinweis" id="speicher-hinweis"></p>
       <button class="knopf knopf--leise" id="knopf-export">Sicherung speichern</button>
+      <p class="sicherung-stand" id="sicherung-stand"></p>
       <button class="knopf knopf--leise" id="knopf-import">Sicherung laden</button>
       <button class="knopf knopf--leise" id="knopf-einstellungen">Einstellungen</button>
       <input type="file" id="datei-sicherung" accept="application/json,.json" hidden>
@@ -106,8 +107,9 @@
           <button class="weg" id="weg-link">
             <span class="weg__bild" aria-hidden="true">🔗</span>
             <span class="weg__titel">Link einer Rezeptseite</span>
-            <span class="weg__text">Adresse einfügen — bei den meisten Rezeptseiten
-              übernimmt die App alles von allein.</span>
+            <span class="weg__text">Adresse einfügen — die App übernimmt Zutaten,
+              Abschnitte und Zubereitung von allein.</span>
+            <span class="weg__marke" id="link-verfahren"></span>
           </button>
 
           <button class="weg" id="weg-text">

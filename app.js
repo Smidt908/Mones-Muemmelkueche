@@ -571,11 +571,9 @@ const KI_SCHEMA = {
   additionalProperties: false
 };
 
-const KI_AUFTRAG = `Du liest Rezepte von Fotos und Screenshots ab und gibst sie strukturiert zurück.
-
-Regeln:
-- Mehrere Bilder gehören immer zu EINEM Rezept und kommen in der richtigen Reihenfolge. Setz sie zusammen. Was sich überlappt, nur einmal übernehmen.
-- Mengen und Einheiten genau so übernehmen, wie sie dastehen. Nichts umrechnen, nichts vereinheitlichen. "1/2 TL" bleibt "1/2 TL".
+// Die Regeln gelten für jede Vorlage — Foto wie Webseite. Nur der erste Satz
+// und die letzten Zeilen unterscheiden sich, siehe KI_AUFTRAG_BILD/_LINK.
+const KI_REGELN = `- Mengen und Einheiten genau so übernehmen, wie sie dastehen. Nichts umrechnen, nichts vereinheitlichen. "1/2 TL" bleibt "1/2 TL".
 - Eine Zutat pro Eintrag, in der Schreibweise der Vorlage: "250 g Mehl".
 - Gliedert die Vorlage die Zutaten in Abschnitte, dann bilde diese Gliederung vollständig ab: Übernimm jede Abschnittsüberschrift wortgleich als eigenen Eintrag mit Doppelpunkt am Ende, an genau der Stelle der Liste, an der sie steht. Ohne diese Trennung weiß beim Kochen niemand, welche Zutat wozu gehört — das ist der wichtigste Teil deiner Arbeit.
   Das gilt unabhängig davon, wie die Überschriften lauten und wie sie gesetzt sind: ob "Für den Teig" oder nur "Teig", ob "Rub", "Marinade", "Guss", "Sud", "Beilage" oder etwas ganz anderes; ob sie fett, unterstrichen, eingerückt, in einem Kasten oder auf einer eigenen Seite stehen. Schreib die Überschrift so, wie sie dasteht, und häng nur den Doppelpunkt an: aus "Rub" wird "Rub:".
@@ -584,9 +582,23 @@ Regeln:
 - Ein Arbeitsschritt pro Eintrag, ohne Nummer davor.
 - Steht keine Portionszahl da, schätz sie aus den Mengen und wähl die passende Einheit (ein Kuchen ist "Blech" oder "Stück", eine Suppe "Portionen").
 - kategorie: aus der vorgegebenen Liste wählen. Bei Namen der Form "X mit Y" zählt X: "Hirschfilet mit Kartoffelgratin" ist Braten, nicht Auflauf.
+- Nichts erfinden und nichts ergänzen. Was nicht in der Vorlage steht, steht nicht im Rezept.`;
+
+const KI_AUFTRAG_BILD = `Du liest Rezepte von Fotos und Screenshots ab und gibst sie strukturiert zurück.
+
+Regeln:
+- Mehrere Bilder gehören immer zu EINEM Rezept und kommen in der richtigen Reihenfolge. Setz sie zusammen. Was sich überlappt, nur einmal übernehmen.
+${KI_REGELN}
 - notizen: nur handschriftliche Ergänzungen am Rand oder Hinweise wie "schmeckt aufgewärmt besser". Sonst leer lassen.
-- Handschrift so genau wie möglich lesen. Bist du bei einem Wort oder einer Zahl unsicher, schreib deine beste Vermutung und häng ein "?" an — dann fällt es beim Prüfen auf.
-- Nichts erfinden und nichts ergänzen. Was nicht auf dem Bild steht, steht nicht im Rezept.`;
+- Handschrift so genau wie möglich lesen. Bist du bei einem Wort oder einer Zahl unsicher, schreib deine beste Vermutung und häng ein "?" an — dann fällt es beim Prüfen auf.`;
+
+const KI_AUFTRAG_LINK = `Du liest Rezepte von Webseiten ab und gibst sie strukturiert zurück. Ruf die genannte Adresse mit dem web_fetch-Werkzeug ab.
+
+Regeln:
+${KI_REGELN}
+- Die Seite enthält neben dem Rezept viel Beiwerk: Navigation, Werbung, Kommentare, Empfehlungen, Nährwerte. Das gehört nicht ins Rezept.
+- notizen: nur Hinweise der Autorin zum Gelingen ("schmeckt aufgewärmt besser", "Teig muss über Nacht ruhen"). Keine Werbung, keine Kommentare, keine Nährwerte. Sonst leer lassen.
+- titel: den Namen des Rezepts, ohne Zusätze wie den Namen der Einsenderin oder "einfach & schnell".`;
 
 /** Skaliert auf die größte Kante, die Opus 4.8 in voller Auflösung nutzt. */
 async function bildFuerKi(datei) {
@@ -632,11 +644,84 @@ function kiFehlerText(status, koerper) {
   return 'Die Erkennung ist fehlgeschlagen (Fehler ' + status + '). ' + meldung;
 }
 
-/** Liest ein Rezept von einem oder mehreren Bildern. */
-async function kiRezeptLesen(dateien, melde) {
+/** Was das Abrufen einer Seite durch Claude schiefgehen lassen kann. */
+function webFetchFehlerText(code) {
+  switch (code) {
+    case 'url_not_accessible': return 'Die Seite war nicht erreichbar. Stimmt die Adresse noch?';
+    case 'url_too_long': return 'Die Adresse ist zu lang (mehr als 250 Zeichen).';
+    case 'url_not_allowed': return 'Diese Seite lässt sich nicht abrufen — sie hat das Auslesen untersagt. Nimm „Rezepttext einfügen".';
+    case 'unsupported_content_type': return 'Unter der Adresse liegt keine lesbare Seite.';
+    case 'too_many_requests': return 'Die Seite hat zu viele Anfragen abgewehrt. Gleich noch einmal versuchen.';
+    case 'invalid_tool_input': return 'Die Adresse ließ sich nicht verarbeiten.';
+    default: return 'Die Seite ließ sich nicht abrufen. Nimm „Rezepttext einfügen" — das geht immer.';
+  }
+}
+
+/** Ein Aufruf an die API, samt Wiederaufnahme, wenn ein Server-Werkzeug pausiert. */
+async function kiRufen(koerper, melde) {
   const schluessel = kiSchluessel();
   if (!schluessel) throw new Error('Kein Schlüssel eingetragen.');
 
+  let daten = null;
+  const nachrichten = [...koerper.messages];
+
+  // Server-Werkzeuge (das Seitenabrufen) können mit "pause_turn" anhalten.
+  // Dann Antwort anhängen und weiterlaufen lassen — höchstens vier Runden,
+  // damit nichts endlos kreist.
+  for (let runde = 0; runde < 4; runde++) {
+    let antwort;
+    try {
+      antwort = await fetch(KI_API, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': schluessel,
+          'anthropic-version': '2023-06-01',
+          // Ohne diese Kopfzeile blockt die API den Aufruf aus dem Browser.
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({ ...koerper, messages: nachrichten })
+      });
+    } catch {
+      throw new Error('Keine Verbindung zu Claude. Ist das Gerät online?');
+    }
+
+    daten = await antwort.json().catch(() => null);
+    if (!antwort.ok) throw new Error(kiFehlerText(antwort.status, daten));
+    if (daten.stop_reason !== 'pause_turn') break;
+
+    melde('Claude arbeitet noch …', null);
+    nachrichten.push({ role: 'assistant', content: daten.content });
+  }
+  return daten;
+}
+
+/** Zieht das Rezept aus der Antwort — und übersetzt, was schiefgegangen sein kann. */
+function kiAntwortAuswerten(daten) {
+  if (daten.stop_reason === 'refusal') {
+    throw new Error('Claude hat die Bearbeitung abgelehnt. Bei einem Rezept ist das seltsam — versuch eine andere Vorlage.');
+  }
+  if (daten.stop_reason === 'max_tokens') {
+    throw new Error('Die Vorlage war zu umfangreich für eine Anfrage.');
+  }
+
+  // Hat das Seitenabrufen selbst versagt, steht das als Block in der Antwort
+  // (die API meldet dafür kein HTTP-Problem).
+  const fehl = (daten.content || []).find(b =>
+    b.type === 'web_fetch_tool_result' && b.content && b.content.type === 'web_fetch_tool_result_error');
+  if (fehl) throw new Error(webFetchFehlerText(fehl.content.error_code));
+
+  // Bei Werkzeugnutzung können mehrere Textblöcke kommen; das Rezept steht im
+  // letzten. Von hinten nach vorn probieren, damit Zwischengeplauder nicht stört.
+  const texte = (daten.content || []).filter(b => b.type === 'text').map(b => b.text);
+  for (let i = texte.length - 1; i >= 0; i--) {
+    try { return JSON.parse(texte[i]); } catch { /* nächsten versuchen */ }
+  }
+  throw new Error('Claude hat kein Rezept zurückgegeben. Versuch es noch einmal.');
+}
+
+/** Liest ein Rezept von einem oder mehreren Bildern. */
+async function kiRezeptLesen(dateien, melde) {
   const bilder = [];
   for (let i = 0; i < dateien.length; i++) {
     melde(dateien.length > 1
@@ -649,61 +734,59 @@ async function kiRezeptLesen(dateien, melde) {
     ? 'Claude liest die ' + dateien.length + ' Bilder …'
     : 'Claude liest das Rezept …', null);
 
-  let antwort;
-  try {
-    antwort = await fetch(KI_API, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': schluessel,
-        'anthropic-version': '2023-06-01',
-        // Ohne diese Kopfzeile blockt die API den Aufruf aus dem Browser.
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: KI_MODELL,
-        max_tokens: 16000,
-        // Nachdenken hilft spürbar bei krakeliger Handschrift.
-        thinking: { type: 'adaptive' },
-        output_config: { format: { type: 'json_schema', schema: KI_SCHEMA } },
-        system: KI_AUFTRAG,
-        messages: [{
-          role: 'user',
-          content: [
-            ...bilder,
-            { type: 'text', text: dateien.length > 1
-              ? 'Diese ' + dateien.length + ' Bilder zeigen EIN Rezept. Lies es ab.'
-              : 'Lies das Rezept auf diesem Bild ab.' }
-          ]
-        }]
-      })
-    });
-  } catch {
-    throw new Error('Keine Verbindung zu Claude. Ist das Gerät online?');
-  }
-
-  const daten = await antwort.json().catch(() => null);
-  if (!antwort.ok) throw new Error(kiFehlerText(antwort.status, daten));
-
-  if (daten.stop_reason === 'refusal') {
-    throw new Error('Claude hat die Bearbeitung abgelehnt. Bei einem Rezept ist das seltsam — versuch ein anderes Bild.');
-  }
-  if (daten.stop_reason === 'max_tokens') {
-    throw new Error('Das Rezept war zu lang für eine Anfrage. Teil es auf weniger Bilder auf.');
-  }
-
-  const textBlock = (daten.content || []).find(b => b.type === 'text');
-  if (!textBlock) throw new Error('Claude hat kein Rezept zurückgegeben.');
-
-  let rezept;
-  try {
-    rezept = JSON.parse(textBlock.text);
-  } catch {
-    throw new Error('Die Antwort war unverständlich. Versuch es noch einmal.');
-  }
+  const daten = await kiRufen({
+    model: KI_MODELL,
+    max_tokens: 16000,
+    // Nachdenken hilft spürbar bei krakeliger Handschrift.
+    thinking: { type: 'adaptive' },
+    output_config: { format: { type: 'json_schema', schema: KI_SCHEMA } },
+    system: KI_AUFTRAG_BILD,
+    messages: [{
+      role: 'user',
+      content: [
+        ...bilder,
+        { type: 'text', text: dateien.length > 1
+          ? 'Diese ' + dateien.length + ' Bilder zeigen EIN Rezept. Lies es ab.'
+          : 'Lies das Rezept auf diesem Bild ab.' }
+      ]
+    }]
+  }, melde);
 
   melde('Fertig.', 1);
-  return { rezept, kosten: kiKostenAus(daten.usage) };
+  return { rezept: kiAntwortAuswerten(daten), kosten: kiKostenAus(daten.usage) };
+}
+
+/**
+ * Liest ein Rezept von einer Webseite — Claude ruft sie selbst ab.
+ * Damit entfällt der ganze Umweg über fremde Weiterleitungsdienste: Der Abruf
+ * passiert auf Anthropics Servern, nicht im Browser, also greift auch keine
+ * CORS-Sperre. Das Abrufen selbst kostet nichts extra, nur die gelesenen Token.
+ */
+async function kiRezeptVonLink(url, melde) {
+  melde('Claude ruft die Seite ab …', null);
+
+  const daten = await kiRufen({
+    model: KI_MODELL,
+    max_tokens: 16000,
+    thinking: { type: 'adaptive' },
+    output_config: { format: { type: 'json_schema', schema: KI_SCHEMA } },
+    system: KI_AUFTRAG_LINK,
+    tools: [{
+      type: 'web_fetch_20260318',
+      name: 'web_fetch',
+      max_uses: 3,
+      // Rezeptseiten sind aufgebläht. Claude filtert vorab selbst, die Grenze
+      // ist die Reißleine gegen Ausreißer.
+      max_content_tokens: 40000
+    }],
+    messages: [{
+      role: 'user',
+      content: 'Lies das Rezept von dieser Seite: ' + url
+    }]
+  }, melde);
+
+  melde('Fertig.', 1);
+  return { rezept: kiAntwortAuswerten(daten), kosten: kiKostenAus(daten.usage) };
 }
 
 /* ── Texterkennung ──────────────────────────────────────
@@ -924,27 +1007,57 @@ const BOTEN = [
   u => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u)
 ];
 
-async function seiteHolen(url, melde) {
-  let letzter = null;
-  for (let i = 0; i < BOTEN.length; i++) {
-    try {
-      melde('Seite wird geladen …', 0.15 + i * 0.15);
-      const antwort = await fetch(BOTEN[i](url));
+/**
+ * Alle Dienste gleichzeitig anrennen, der erste Treffer gewinnt.
+ * Nacheinander zu warten hieße: dreimal in einen Zeitablauf laufen, bevor
+ * überhaupt etwas passiert. Parallel ist die Wartezeit die des schnellsten
+ * Dienstes statt die Summe aller Ausfälle — und genau das macht den
+ * kostenlosen Versuch überhaupt erst zumutbar.
+ */
+async function seiteHolen(url, frist) {
+  const versuche = BOTEN.map(bote =>
+    fetch(bote(url), { signal: AbortSignal.timeout(frist) }).then(async antwort => {
       if (!antwort.ok) throw new Error('HTTP ' + antwort.status);
       const html = await antwort.text();
       if (!html || html.length < 400) throw new Error('Antwort war leer');
       return html;
-    } catch (fehler) {
-      letzter = fehler;
-    }
-  }
-  throw letzter || new Error('Die Seite war nicht erreichbar.');
+    }));
+
+  // Promise.any: der erste Erfolg zählt, alle Ausfälle werden verschluckt.
+  return Promise.any(versuche);
 }
 
 /** HTML-Schnipsel zu reinem Text — über DOMParser, der nichts nachlädt und nichts ausführt. */
 function nurText(schnipsel) {
   const doc = new DOMParser().parseFromString(String(schnipsel), 'text/html');
   return (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Flickt Zutaten, die eine Seite versehentlich zerrissen hat.
+ * einfachbacken.de zerlegt seine Zutatenliste irgendwo am Komma: Aus
+ * "Etwas Vanille (0,5 Schote)" werden zwei Einträge — "Etwas Vanille (0"
+ * und "5 Schote)". Unpaarige Klammern verraten das eindeutig, also wieder
+ * zusammensetzen. Ohne Klammern wird nichts angefasst: "Salz" und "Pfeffer"
+ * sind auch getrennt richtig.
+ */
+function zutatenFlicken(flach) {
+  const zaehl = (s, z) => (String(s).match(z) || []).length;
+  const raus = [];
+
+  for (let i = 0; i < flach.length; i++) {
+    let zeile = String(flach[i]);
+    let offen = zaehl(zeile, /\(/g) - zaehl(zeile, /\)/g);
+
+    // Am Komma getrennt, also auch mit Komma wieder zusammen: "(0" + "5" → "(0,5"
+    while (offen > 0 && i + 1 < flach.length) {
+      const naechste = String(flach[++i]).trim();
+      zeile += ',' + naechste;
+      offen += zaehl(naechste, /\(/g) - zaehl(naechste, /\)/g);
+    }
+    raus.push(zeile);
+  }
+  return raus;
 }
 
 function rezeptImJson(wert, tiefe = 0) {
@@ -1013,7 +1126,11 @@ function portionenLesen(wert) {
   const einheit = /stück|stk/i.test(s) ? 'Stück'
     : /gläser|glas/i.test(s) ? 'Gläser'
     : /blech/i.test(s) ? 'Blech'
-    : /person/i.test(s) ? 'Personen' : 'Portionen';
+    : /person/i.test(s) ? 'Personen'
+    : /portion/i.test(s) ? 'Portionen'
+    // "1 Torte", "1 Kastenform", "2 Laibe" — das Gebäck selbst ist die Einheit.
+    : /torte|kuchen|brot|laib|form|blech|pizza|zopf/i.test(s) ? 'Stück'
+    : 'Portionen';
 
   return { portionen: Math.max(1, Math.min(99, parseInt(zahl[0], 10))), einheit };
 }
@@ -1210,9 +1327,9 @@ function rezeptAusHtml(html, url) {
     const r = rezeptImJson(daten);
     if (!r) continue;
 
-    const zutaten = []
+    const zutaten = zutatenFlicken([]
       .concat(r.recipeIngredient || r.ingredients || [])
-      .map(z => nurText(z)).filter(Boolean);
+      .map(z => nurText(z)).filter(Boolean));
     if (!zutaten.length) continue;
 
     const stand = portionenLesen(r.recipeYield);
@@ -1440,6 +1557,7 @@ function listeZeichnen() {
   const garNichts = stand.rezepte.length === 0;
   $('#leer-hinweis').hidden = !garNichts;
   mahnungZeichnen();
+  sicherungStandZeichnen();
 
   if (!liste.length && !garNichts) {
     const nichts = el('p', 'beischrift', stand.suche
@@ -1920,19 +2038,82 @@ async function linkVerarbeiten(adresse) {
 
   arbeitZeigen(true);
   try {
-    const html = await seiteHolen(url.href, melden);
+    const mitSchluessel = !!kiSchluessel();
 
-    melden('Rezept wird gesucht …', 0.7);
-    const gefunden = rezeptAusHtml(html, url.href);
+    // Immer zuerst der kostenlose Weg. Gibt die Seite ihre Daten sauber
+    // heraus, ist das nicht nur gratis, sondern auch genauer als jedes
+    // Ablesen — es sind die Angaben der Seite selbst.
+    // Mit Schlüssel wird nur kurz gewartet, weil Claude verlässlich dahinter
+    // steht; ohne Schlüssel lohnt sich längeres Warten, weil es sonst nichts gibt.
+    let entwurf = await entwurfPerBoten(url.href, mitSchluessel ? 8000 : 20000);
 
-    if (!gefunden || !gefunden.zutaten.length) {
-      throw new Error('Auf dieser Seite war kein Rezept zu finden. Nimm stattdessen „Rezepttext einfügen": auf der Seite alles markieren, kopieren, einfügen.');
+    if (!entwurf && mitSchluessel) {
+      entwurf = await entwurfPerKiLink(url.href);
     }
 
-    const bild = await bildVomNetz(gefunden.bildUrl, melden);
+    if (!entwurf) {
+      throw new Error('Die Seite ließ sich nicht laden — die kostenlosen Weiterleitungsdienste antworten gerade nicht. '
+        + 'Mit einem Claude-Schlüssel (Einstellungen) entfällt dieser Umweg. '
+        + 'Sonst: „Rezepttext einfügen" — das geht immer.');
+    }
 
     arbeitZeigen(false);
-    formularOeffnen({
+    formularOeffnen(entwurf.daten, 'geraten', entwurf.hinweis);
+  } catch (fehler) {
+    arbeitZeigen(false);
+    neuFehler(fehler.message || 'Die Seite ließ sich nicht laden.');
+  }
+}
+
+/** Mit Schlüssel: Claude ruft die Seite selbst ab — kein fremder Dienst dazwischen. */
+async function entwurfPerKiLink(url) {
+  const { rezept, kosten } = await kiRezeptVonLink(url, melden);
+
+  if (!rezept.zutaten || !rezept.zutaten.length) {
+    throw new Error('Auf dieser Seite war kein Rezept zu finden. Nimm „Rezepttext einfügen": auf der Seite alles markieren, kopieren, einfügen.');
+  }
+
+  const stand = kiKostenBuchen(kosten);
+  return {
+    daten: {
+      titel: rezept.titel || 'Neues Rezept',
+      kategorie: KAT_NACH_KEY[rezept.kategorie] ? rezept.kategorie : 'sonstiges',
+      portionen: Math.max(1, Math.min(99, rezept.portionen || 4)),
+      einheit: rezept.einheit || 'Portionen',
+      zutaten: rezept.zutaten,
+      schritte: rezept.schritte || [],
+      notizen: rezept.notizen || '',
+      quelle: url,
+      bild: null
+    },
+    hinweis: 'Von Claude aus der Seite gelesen (' + centText(kosten) + '; bisher '
+      + stand.anzahl + (stand.anzahl === 1 ? ' Rezept für ' : ' Rezepte für ')
+      + centText(stand.summe) + '). Ein prüfender Blick schadet nie.'
+  };
+}
+
+/**
+ * Der kostenlose Weg über die Weiterleitungsdienste.
+ * Liefert null statt eines Fehlers, wenn nichts herauskommt — dann entscheidet
+ * der Aufrufer, ob Claude übernimmt.
+ */
+async function entwurfPerBoten(url, frist) {
+  let html;
+  try {
+    melden('Seite wird geladen …', 0.3);
+    html = await seiteHolen(url, frist);
+  } catch {
+    return null;
+  }
+
+  melden('Rezept wird gesucht …', 0.6);
+  const gefunden = rezeptAusHtml(html, url);
+  if (!gefunden || !gefunden.zutaten.length) return null;
+
+  const bild = await bildVomNetz(gefunden.bildUrl, melden);
+
+  return {
+    daten: {
       titel: gefunden.titel,
       kategorie: kategorieRaten(gefunden.titel, gefunden.zutaten, gefunden.schritte),
       portionen: gefunden.portionen || 4,
@@ -1940,17 +2121,13 @@ async function linkVerarbeiten(adresse) {
       zutaten: gefunden.zutaten,
       schritte: gefunden.schritte,
       notizen: '',
-      quelle: url.href,
+      quelle: url,
       bild
-    }, gefunden.art);
-  } catch (fehler) {
-    arbeitZeigen(false);
-    // Die Weiterleitungsdienste sind kostenlos und entsprechend launisch —
-    // hier landet man leicht, ohne dass die Rezeptseite schuld wäre.
-    neuFehler((fehler.message || 'Die Seite ließ sich nicht laden.') +
-      (/Rezepttext einfügen/.test(fehler.message || '') ? ''
-        : ' Der Weiterleitungsdienst antwortet gerade nicht. Nimm „Rezepttext einfügen" — das geht immer.'));
-  }
+    },
+    hinweis: gefunden.art === 'strukturiert'
+      ? 'Direkt von der Seite übernommen — kostenlos, Claude war nicht nötig. Ein prüfender Blick schadet trotzdem nicht.'
+      : 'Aus dem Seitentext geraten — kostenlos, aber ungenauer. Schau bitte drüber, vor allem bei den Mengen.'
+  };
 }
 
 /**
@@ -2027,13 +2204,23 @@ function einstellungenZeichnen() {
   stand.textContent = text;
 }
 
-/** Zeigt am Foto-Knopf, was gerade passieren würde. */
+/** Zeigt an den Knöpfen, was gerade passieren würde. */
 function verfahrenMarkeZeichnen() {
-  const marke = $('#foto-verfahren');
-  if (!marke) return;
   const hat = !!kiSchluessel();
-  marke.textContent = hat ? 'Claude liest mit — auch Handschrift' : 'Texterkennung auf dem Gerät — keine Handschrift';
-  marke.className = 'weg__marke' + (hat ? ' weg__marke--ki' : '');
+
+  const foto = $('#foto-verfahren');
+  if (foto) {
+    foto.textContent = hat ? 'Claude liest mit — auch Handschrift' : 'Texterkennung auf dem Gerät — keine Handschrift';
+    foto.className = 'weg__marke' + (hat ? ' weg__marke--ki' : '');
+  }
+
+  const link = $('#link-verfahren');
+  if (link) {
+    link.textContent = hat
+      ? 'Erst kostenlos — nur wenn das scheitert, fragt Claude (~9 Cent)'
+      : 'Über fremde Dienste — fällt öfter aus';
+    link.className = 'weg__marke' + (hat ? ' weg__marke--ki' : '');
+  }
 }
 
 function schluesselSichern() {
@@ -2086,6 +2273,33 @@ function letzteSicherung() {
 function sicherungBuchen() {
   try { localStorage.setItem(SICHERUNG_FACH, JSON.stringify({ zeit: Date.now() })); } catch { /* egal */ }
   mahnungZeichnen();
+  sicherungStandZeichnen();
+}
+
+/** Wie lange ist die letzte Sicherung her, in Worten. */
+function sicherungAlterText() {
+  const s = letzteSicherung();
+  if (!s) return 'Noch nie gesichert';
+  const min = Math.floor((Date.now() - s.zeit) / 60000);
+  if (min < 1) return 'Gerade eben gesichert';
+  if (min < 60) return 'Zuletzt gesichert vor ' + min + (min === 1 ? ' Minute' : ' Minuten');
+  const std = Math.floor(min / 60);
+  if (std < 24) return 'Zuletzt gesichert vor ' + std + (std === 1 ? ' Stunde' : ' Stunden');
+  const tage = Math.floor(std / 24);
+  if (tage === 1) return 'Zuletzt gesichert gestern';
+  return 'Zuletzt gesichert vor ' + tage + ' Tagen';
+}
+
+/** Dauerhafte Zeile in der Leiste — anders als die Erinnerung immer sichtbar. */
+function sicherungStandZeichnen() {
+  const knoten = $('#sicherung-stand');
+  if (!knoten) return;
+  const offen = ungesichertZahl();
+  let text = sicherungAlterText();
+  if (letzteSicherung() && offen > 0) {
+    text += ' · ' + offen + (offen === 1 ? ' Rezept seither neu' : ' Rezepte seither neu');
+  }
+  knoten.textContent = text;
 }
 
 /** Wie viele Rezepte haben sich seit der letzten Sicherung geändert? */
@@ -2155,20 +2369,29 @@ async function sicherungSpeichern() {
   const blob = new Blob([JSON.stringify(paket)], { type: 'application/json' });
   const heute = new Date().toISOString().slice(0, 10);
   const name = 'muemmelkueche-' + heute + '.json';
-
-  // Auf dem Handy führt der Teilen-Dialog die Datei mit einem Tipp nach
-  // Google Drive oder in eine Mail — dort liegt sie sicherer als im
-  // Download-Ordner desselben Geräts, das kaputtgehen kann.
   const datei = new File([blob], name, { type: 'application/json' });
-  if (navigator.canShare && navigator.canShare({ files: [datei] })) {
+
+  // Nur auf Touch-Geräten den Teilen-Dialog: Dort führt er die Datei mit einem
+  // Tipp nach Google Drive oder in eine Mail — sicherer als der Download-Ordner
+  // desselben Geräts. Am Rechner öffnet canShare inzwischen ebenfalls einen
+  // Teilen-Dialog (Windows), aber dort erwartet man einen simplen Download;
+  // bricht man den fremden Dialog ab, wäre nichts gesichert. Also am Rechner
+  // gar nicht erst teilen.
+  const istBeruehrung = matchMedia('(pointer: coarse)').matches;
+  if (istBeruehrung && navigator.canShare && navigator.canShare({ files: [datei] })) {
     try {
       await navigator.share({ files: [datei], title: 'Mones Mümmelküche — Sicherung' });
       sicherungBuchen();
+      sicherungRueckmeldung('Sicherung geteilt ✓');
       return;
     } catch (fehler) {
-      // Abgebrochen heißt: nicht gesichert. Nicht als erledigt verbuchen.
-      if (fehler && fehler.name === 'AbortError') return;
-      // Alles andere: normal herunterladen.
+      // Abgebrochen heißt: nicht gesichert. Ehrlich sagen, warum die
+      // Erinnerung bleibt — statt sie still hängen zu lassen.
+      if (fehler && fehler.name === 'AbortError') {
+        sicherungRueckmeldung('Abgebrochen — nicht gesichert.');
+        return;
+      }
+      // Alles andere: auf den Download zurückfallen.
     }
   }
 
@@ -2179,6 +2402,20 @@ async function sicherungSpeichern() {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   sicherungBuchen();
+  sicherungRueckmeldung('Gesichert ✓ Die Datei liegt in den Downloads.');
+}
+
+/** Kurze sichtbare Rückmeldung in der Leiste, damit sich sichtbar etwas tut. */
+function sicherungRueckmeldung(text) {
+  const knoten = $('#sicherung-stand');
+  if (!knoten) return;
+  knoten.textContent = text;
+  knoten.classList.add('sicherung-stand--frisch');
+  clearTimeout(sicherungRueckmeldung._uhr);
+  sicherungRueckmeldung._uhr = setTimeout(() => {
+    knoten.classList.remove('sicherung-stand--frisch');
+    sicherungStandZeichnen();
+  }, 4000);
 }
 
 async function sicherungLaden(datei) {
