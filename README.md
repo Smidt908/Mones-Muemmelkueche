@@ -68,7 +68,10 @@ nicht.
 
 1. Auf GitHub ein **öffentliches** Repository anlegen (Pages ist im Gratis-Tarif
    nur für öffentliche Repos verfügbar).
-2. Den Inhalt dieses Ordners hineinschieben:
+2. **Den ganzen Ordner hochladen — alles, auch `ocr/`.** Der wiegt 10 MB und
+   sieht nach Ballast aus, ist aber die Texterkennung: Ohne ihn startet die App
+   zwar, aber Foto- und Screenshot-Import sind tot. `git add .` erwischt alles;
+   die versteckten `.nojekyll` und `.gitattributes` gehören ebenfalls dazu.
 
    ```bash
    git init
@@ -79,11 +82,23 @@ nicht.
    git push -u origin main
    ```
 
+   Gegenprobe vor dem Hochladen — hier müssen **13 Dateien** stehen, darunter
+   die vier aus `ocr/`:
+
+   ```bash
+   git status --short
+   ```
+
 3. Im Repository unter **Settings → Pages** als Quelle `main` / `/ (root)`
    wählen.
 4. Nach ein bis zwei Minuten ist die App unter
    `https://<name>.github.io/<repo>/` erreichbar.
-5. Dort in Chrome öffnen → Menü → **Zum Startbildschirm hinzufügen**.
+5. Gegenprobe, dass die Texterkennung wirklich mitgekommen ist: die Adresse
+   `https://<name>.github.io/<repo>/ocr/tesseract.min.js` im Browser aufrufen.
+   Kommt JavaScript-Text, ist alles da. Kommt „404", fehlt der Ordner — dann
+   scheitert später der Foto-Import mit „Die Texterkennung konnte nicht geladen
+   werden".
+6. Die Seite in Chrome öffnen → Menü → **Zum Startbildschirm hinzufügen**.
 
 Alle Pfade im Code sind relativ (`./`), die App läuft deshalb auch im
 Unterordner.
